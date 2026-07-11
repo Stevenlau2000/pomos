@@ -1,0 +1,40 @@
+# POMOS v6.0 — 本地基础设施
+# 仅开发期使用；生产部署见各子目录 README（Vercel + Railway/Render/Fly.io）
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: pomos-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: pomos
+      POSTGRES_PASSWORD: pomos_dev
+      POSTGRES_DB: pomos
+    ports:
+      - "5432:5432"
+    volumes:
+      - pomos_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pomos -d pomos"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: pomos-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - pomos_redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  pomos_pgdata:
+  pomos_redisdata:

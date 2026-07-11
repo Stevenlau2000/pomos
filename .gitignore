@@ -1,0 +1,39 @@
+# ---------- 全局 ----------
+.DS_Store
+*.log
+*.db
+.env
+.env.local
+.idea/
+.vscode/
+
+# ---------- Python / 后端 ----------
+backend/__pycache__/
+backend/*/__pycache__/
+backend/.venv/
+backend/venv/
+backend/*.db
+backend/runtime_settings.json
+backend/uploads/
+backend/.pytest_cache/
+*.egg-info/
+
+# ---------- Node / 前端 ----------
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/.vercel/
+frontend/*.tsbuildinfo
+frontend/.env*.local
+
+# ---------- 产物 ----------
+dist/
+build/
+coverage/
+
+# 构建缓存备份
+.next_bak_*/
+
+# 前端构建缓存备份（next dev/build 生成）
+frontend/.next_bak_*/
+**/.next_bak*/
