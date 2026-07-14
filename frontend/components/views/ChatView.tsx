@@ -16,6 +16,12 @@ interface ChatViewProps {
 
 const ChatView: React.FC<ChatViewProps> = ({ messages, loading, onSend }) => {
   const { t } = useI18n();
+  // 末条为导师错误气泡时，提供「重试」入口：重发最后一条用户消息
+  const last = messages[messages.length - 1];
+  const isError = !!last && last.role === "mentor" && last.content.startsWith("⚠️");
+  const lastUserMsg = [...messages]
+    .reverse()
+    .find((m) => m.role === "user")?.content;
   return (
     <div className="flex h-full flex-col">
       <div className="border-b border-border px-6 py-3">
@@ -26,7 +32,19 @@ const ChatView: React.FC<ChatViewProps> = ({ messages, loading, onSend }) => {
       </div>
       <div className="flex flex-1 flex-col overflow-hidden">
         <ChatWindow messages={messages} loading={loading} />
-        <ChatInput onSend={onSend} disabled={loading} />
+        {isError && lastUserMsg && (
+          <div className="flex items-center justify-between gap-3 border-t border-destructive/30 bg-destructive/5 px-4 py-2 text-xs">
+            <span className="text-destructive">⚠️ 发送失败，可重试</span>
+            <button
+              onClick={() => onSend(lastUserMsg)}
+              disabled={loading}
+              className="rounded-md bg-brand px-3 py-1 text-[11px] font-medium text-brand-foreground disabled:opacity-60"
+            >
+              重试
+            </button>
+          </div>
+        )}
+        <ChatInput onSend={onSend} disabled={loading} loading={loading} />
       </div>
     </div>
   );

@@ -46,6 +46,15 @@ const TrainingView: React.FC<TrainingViewProps> = ({ studentId, refreshKey }) =>
   const [expandedWeek, setExpandedWeek] = React.useState<number | null>(null);
   const [expandedTask, setExpandedTask] = React.useState<number | null>(null);
   const [copiedKey, setCopiedKey] = React.useState<string | null>(null);
+  const [msg, setMsg] = React.useState("");
+  const [msgType, setMsgType] = React.useState<"ok" | "err" | "">("");
+  const flash = React.useCallback((type: "ok" | "err", text: string) => {
+    setMsgType(type);
+    setMsg(text);
+    if (typeof window !== "undefined") {
+      window.setTimeout(() => setMsg(""), 2800);
+    }
+  }, []);
 
   React.useEffect(() => {
     let alive = true;
@@ -61,17 +70,42 @@ const TrainingView: React.FC<TrainingViewProps> = ({ studentId, refreshKey }) =>
   const today = plan?.today ?? TODAY_PLAN;
   const rationale = plan?.rationale;
 
+  /** 当 navigator.clipboard 不可用时，用 execCommand('copy') 兜底 */
+  const copyByExecCommand = (text: string): boolean => {
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.top = "-9999px";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      const ok = document.execCommand("copy");
+      document.body.removeChild(ta);
+      return ok;
+    } catch {
+      return false;
+    }
+  };
+
   const handleCopy = React.useCallback(
     async (text: string, key: string) => {
+      let ok = false;
       try {
         await navigator.clipboard.writeText(text);
+        ok = true;
+      } catch {
+        ok = copyByExecCommand(text);
+      }
+      if (ok) {
         setCopiedKey(key);
         window.setTimeout(() => setCopiedKey(null), 1500);
-      } catch {
-        // ignore clipboard errors
+      } else {
+        flash("err", "复制失败，请手动复制");
       }
     },
-    []
+    [flash]
   );
 
   const weekPrompt = (w: (typeof weekly)[number]) =>
@@ -236,6 +270,17 @@ const TrainingView: React.FC<TrainingViewProps> = ({ studentId, refreshKey }) =>
           </div>
         </CardContent>
       </Card>
+
+      {msg && (
+        <div
+          className={
+            "sticky bottom-0 border-t bg-background/95 px-6 py-2 text-xs backdrop-blur " +
+            (msgType === "ok" ? "text-success" : "text-destructive")
+          }
+        >
+          {msg}
+        </div>
+      )}
     </div>
   );
 };

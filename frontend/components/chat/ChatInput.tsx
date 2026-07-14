@@ -10,9 +10,11 @@ import { Input } from "@/components/ui/input";
 interface ChatInputProps {
   onSend: (message: string) => void;
   disabled?: boolean;
+  /** 发送进行中：禁用并显示「发送中…」 */
+  loading?: boolean;
 }
 
-const ChatInput: React.FC<ChatInputProps> = ({ onSend, disabled }) => {
+const ChatInput: React.FC<ChatInputProps> = ({ onSend, disabled, loading }) => {
   const [value, setValue] = React.useState("");
 
   const submit = () => {
@@ -40,7 +42,7 @@ const ChatInput: React.FC<ChatInputProps> = ({ onSend, disabled }) => {
       />
       <Button onClick={submit} disabled={disabled || !value.trim()}>
         <Send className="h-4 w-4" />
-        发送
+        {loading ? "发送中…" : "发送"}
       </Button>
     </div>
   );

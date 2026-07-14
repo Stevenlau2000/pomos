@@ -95,6 +95,10 @@ const OverviewView: React.FC<OverviewViewProps> = ({ studentId, refreshKey }) =>
   const readiness = dash ? dash.readiness : SAMPLE_READINESS;
 
   const lowest = [...PCDF_LAYERS].sort((a, b) => a.score - b.score)[0];
+  // 最弱维度优先取实时数字孪生（动态数据），无数据时回退到静态 PCDF 参考层
+  const weakestDim = dash?.twin
+    ? [...dash.twin].sort((a, b) => a.value - b.value)[0]
+    : null;
   const realMistakes = mistakes ?? MISTAKES;
   const unmastered = realMistakes.filter((m) => m.status !== "已掌握").length;
   const avgDim = dash
@@ -129,9 +133,9 @@ const OverviewView: React.FC<OverviewViewProps> = ({ studentId, refreshKey }) =>
         />
         <StatCard
           icon={<BookOpen className="h-5 w-5" />}
-          label="最弱诊断层"
-          value={`L${lowest.layer}`}
-          sub={lowest.name}
+          label="最弱维度"
+          value={weakestDim ? weakestDim.label : `L${lowest.layer}`}
+          sub={weakestDim ? `数字孪生 · ${Math.round(weakestDim.value * 100)}` : lowest.name}
         />
       </div>
 

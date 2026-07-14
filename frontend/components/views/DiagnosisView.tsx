@@ -100,7 +100,7 @@ const DiagnosisView: React.FC<DiagnosisViewProps> = ({
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-sm">分层健康度</CardTitle>
+          <CardTitle className="text-sm">分层健康度（示例数据）</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
           {PCDF_LAYERS.map((l) => {
@@ -133,7 +133,7 @@ const DiagnosisView: React.FC<DiagnosisViewProps> = ({
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-sm">认知 Bug 清单（Cognitive Bugs）</CardTitle>
+          <CardTitle className="text-sm">认知 Bug 清单（Cognitive Bugs · 示例数据）</CardTitle>
         </CardHeader>
         <CardContent className="space-y-2">
           {COGNITIVE_BUGS.map((b) => (

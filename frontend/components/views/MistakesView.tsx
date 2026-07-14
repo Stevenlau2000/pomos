@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { MISTAKES, type MistakeStatus } from "@/lib/pomosData";
 import {
   getMistakes,
+  getApiMode,
   createMistake,
   updateMistake,
   deleteMistake,
@@ -16,7 +17,22 @@ import {
   API_BASE,
   type Mistake as ApiMistake,
 } from "@/lib/api";
+import { getMistakes as offlineGetMistakes } from "@/lib/offlineApi";
 import { useI18n } from "@/lib/i18n";
+
+/** 轻量 toast：用于把加载/写入失败反馈给用户（替代静默 catch） */
+function useFlash() {
+  const [msg, setMsg] = React.useState("");
+  const [msgType, setMsgType] = React.useState<"ok" | "err" | "">("");
+  const flash = React.useCallback((type: "ok" | "err", text: string) => {
+    setMsgType(type);
+    setMsg(text);
+    if (typeof window !== "undefined") {
+      window.setTimeout(() => setMsg(""), 2800);
+    }
+  }, []);
+  return { msg, msgType, flash };
+}
 
 function statusVariant(s: string) {
   if (s === "已掌握") return "success" as const;
@@ -50,12 +66,26 @@ const MistakesView: React.FC<MistakesViewProps> = ({ studentId, refreshKey }) =>
   const [analysis, setAnalysis] = React.useState("");
   const [file, setFile] = React.useState<File | null>(null);
   const [busy, setBusy] = React.useState(false);
+  const { msg, msgType, flash } = useFlash();
 
   const load = React.useCallback(() => {
     getMistakes(studentId)
       .then(setList)
-      .catch(() => setList(null));
-  }, [studentId]);
+      .catch(async () => {
+        // 离线模式下 api 层会路由到 offlineApi；若仍失败则直接从 localStorage 兜底读取
+        if (getApiMode() === "offline") {
+          try {
+            const local = await offlineGetMistakes(studentId);
+            setList(local);
+            return;
+          } catch {
+            /* 落到静态示例 */
+          }
+        }
+        setList(null);
+        flash("err", "错题加载失败，显示示例数据");
+      });
+  }, [studentId, flash]);
 
   React.useEffect(() => {
     load();
@@ -83,8 +113,8 @@ const MistakesView: React.FC<MistakesViewProps> = ({ studentId, refreshKey }) =>
       setAnalysis("");
       setFile(null);
       load();
-    } catch {
-      /* 忽略 */
+    } catch (e) {
+      flash("err", "操作失败：" + ((e as Error)?.message || String(e)));
     } finally {
       setBusy(false);
     }
@@ -94,8 +124,8 @@ const MistakesView: React.FC<MistakesViewProps> = ({ studentId, refreshKey }) =>
     try {
       await updateMistake(studentId, m.id, { status: NEXT_STATUS[m.status] ?? "未掌握" });
       load();
-    } catch {
-      /* 忽略 */
+    } catch (e) {
+      flash("err", "操作失败：" + ((e as Error)?.message || String(e)));
     }
   };
 
@@ -103,8 +133,8 @@ const MistakesView: React.FC<MistakesViewProps> = ({ studentId, refreshKey }) =>
     try {
       await deleteMistake(studentId, m.id);
       load();
-    } catch {
-      /* 忽略 */
+    } catch (e) {
+      flash("err", "操作失败：" + ((e as Error)?.message || String(e)));
     }
   };
 
@@ -112,8 +142,8 @@ const MistakesView: React.FC<MistakesViewProps> = ({ studentId, refreshKey }) =>
     try {
       await updateMistake(studentId, m.id, { analysis: text });
       load();
-    } catch {
-      /* 忽略 */
+    } catch (e) {
+      flash("err", "操作失败：" + ((e as Error)?.message || String(e)));
     }
   };
 
@@ -121,8 +151,8 @@ const MistakesView: React.FC<MistakesViewProps> = ({ studentId, refreshKey }) =>
     try {
       await uploadMistakeImage(studentId, m.id, f);
       load();
-    } catch {
-      /* 忽略 */
+    } catch (e) {
+      flash("err", "操作失败：" + ((e as Error)?.message || String(e)));
     }
   };
 
@@ -203,6 +233,17 @@ const MistakesView: React.FC<MistakesViewProps> = ({ studentId, refreshKey }) =>
           <p className="text-xs text-muted-foreground">错题本为空。在诊断视图检测到的误区可一键加入。</p>
         )}
       </div>
+
+      {msg && (
+        <div
+          className={
+            "sticky bottom-0 border-t bg-background/95 px-6 py-2 text-xs backdrop-blur " +
+            (msgType === "ok" ? "text-success" : "text-destructive")
+          }
+        >
+          {msg}
+        </div>
+      )}
     </div>
   );
 };

@@ -14,9 +14,15 @@ import { useI18n } from "@/lib/i18n";
 interface GraphViewProps {
   studentId: string;
   refreshKey?: number;
+  /** 点击节点详情中的「生成针对性训练」：交给上层用导师对话生成训练 */
+  onGenerateTraining?: (node: KGNode) => void;
 }
 
-const GraphView: React.FC<GraphViewProps> = ({ studentId, refreshKey }) => {
+const GraphView: React.FC<GraphViewProps> = ({
+  studentId,
+  refreshKey,
+  onGenerateTraining,
+}) => {
   const { t } = useI18n();
   const [selected, setSelected] = React.useState<KGNode | null>(null);
   const [dash, setDash] = React.useState<Dashboard | null>(null);
@@ -81,7 +87,12 @@ const GraphView: React.FC<GraphViewProps> = ({ studentId, refreshKey }) => {
                   <span className="font-semibold">{"★".repeat(selected.importance)}</span>
                 </div>
               </div>
-              <button className="mt-2 w-full rounded-md bg-brand px-3 py-2 text-xs font-medium text-brand-foreground">
+              <button
+                onClick={() => {
+                  if (selected) onGenerateTraining?.(selected);
+                }}
+                className="mt-2 w-full rounded-md bg-brand px-3 py-2 text-xs font-medium text-brand-foreground transition-colors hover:bg-brand/90"
+              >
                 生成针对性训练
               </button>
             </div>

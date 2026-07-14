@@ -21,6 +21,7 @@ import {
   testConnection,
   updateStudent,
   createStudent,
+  getApiMode,
   type SettingsResponse,
 } from "@/lib/api";
 import { useI18n, type Locale } from "@/lib/i18n";
@@ -177,7 +178,12 @@ export default function SettingsPanel(props: SettingsPanelProps) {
       await putSettings(body);
       setApiKey("");
       props.onSaved();
-      flash("ok", t("settings.api.savedHint"));
+      flash(
+        "ok",
+        getApiMode() === "offline"
+          ? "已离线保存（本地），配置后端并重新部署后生效"
+          : t("settings.api.savedHint"),
+      );
     } catch (e) {
       flash("err", String(e));
     } finally {
@@ -189,7 +195,12 @@ export default function SettingsPanel(props: SettingsPanelProps) {
     try {
       await putSettings({ coach_language: coachLang });
       props.onSaved();
-      flash("ok", t("settings.saved"));
+      flash(
+        "ok",
+        getApiMode() === "offline"
+          ? "已离线保存（本地），配置后端并重新部署后生效"
+          : t("settings.saved"),
+      );
     } catch (e) {
       flash("err", String(e));
     }
@@ -200,7 +211,7 @@ export default function SettingsPanel(props: SettingsPanelProps) {
     props.onStudentChange(payload);
     try {
       await updateStudent(props.studentId, payload);
-      setStudentMsg("已保存到后端 ✓");
+      setStudentMsg(getApiMode() === "offline" ? "已保存到本地" : "已保存到后端 ✓");
     } catch {
       // 本地随机 id 在后端不存在时，创建真实学生并把新 id 同步回工作台
       try {

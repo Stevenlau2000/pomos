@@ -26,7 +26,7 @@ import {
   type StudentUpdate,
 } from "@/lib/api";
 import { I18nProvider } from "@/lib/i18n";
-import { SAMPLE_PQ } from "@/lib/pomosData";
+import { SAMPLE_PQ, type KGNode } from "@/lib/pomosData";
 
 const STORAGE_KEY = "pomos_student_id";
 const STUDENT_KEY = "pomos_student";
@@ -268,6 +268,15 @@ function WorkspaceInner() {
       });
   };
 
+  // 知识图谱节点「生成针对性训练」：跳转到对话视图，把该板块交给导师（在线/离线）生成梯度训练
+  const handleGenerateTraining = (node: KGNode) => {
+    setView("chat");
+    handleSend(
+      `请基于我的知识图谱，针对「${node.name}」（${node.board} 板块）为我生成一套针对性训练计划：` +
+        `先建立物理图像，再上公式，包含 3–5 道由浅入深的梯度题，并标注易错点。`,
+    );
+  };
+
   const renderView = () => {
     switch (view) {
       case "chat":
@@ -277,7 +286,13 @@ function WorkspaceInner() {
       case "twin":
         return <TwinView studentId={studentId} refreshKey={refreshKey} />;
       case "graph":
-        return <GraphView studentId={studentId} refreshKey={refreshKey} />;
+        return (
+          <GraphView
+            studentId={studentId}
+            refreshKey={refreshKey}
+            onGenerateTraining={handleGenerateTraining}
+          />
+        );
       case "diagnosis":
         return (
           <DiagnosisView

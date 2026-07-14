@@ -52,6 +52,11 @@ const TwinView: React.FC<TwinViewProps> = ({ studentId, refreshKey }) => {
   const sorted = [...dims].sort((a, b) => b.value - a.value);
   const strongest = sorted[0];
   const weakest = sorted[sorted.length - 1];
+  // 建议优先训练的两个最弱维度（动态来自实时孪生数据，而非写死文案）
+  const weakestTwo = [...dims]
+    .sort((a, b) => a.value - b.value)
+    .slice(0, 2)
+    .map((d) => d.label);
 
   return (
     <div className="h-full space-y-4 overflow-y-auto p-6">
@@ -87,7 +92,7 @@ const TwinView: React.FC<TwinViewProps> = ({ studentId, refreshKey }) => {
         <CardContent className="flex flex-wrap gap-2 text-xs">
           <Badge variant="success">优势：{strongest.label} {strongest.value}</Badge>
           <Badge variant="destructive">短板：{weakest.label} {weakest.value}</Badge>
-          <Badge variant="secondary">建议优先：迁移能力 / 跨板块综合</Badge>
+          <Badge variant="secondary">建议优先：{weakestTwo.join(" / ")}</Badge>
         </CardContent>
       </Card>
     </div>
