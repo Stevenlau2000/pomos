@@ -53,9 +53,12 @@ class Settings(BaseSettings):
     redis_url: str = Field(default="redis://localhost:6379/0", description="Redis 连接串")
 
     # 跨域
+    # 注意：CORS 白名单仅在进程启动时由 main.py 构建一次 CORSMiddleware 时读取。
+    # 经 PUT /api/settings 修改 cors_origins 仅更新本单例与 runtime_settings.json，
+    # 不会热改已固化的中间件——实际生效需重启后端进程（见 settings 路由的 cors_origins_note）。
     cors_origins: str = Field(
         default="http://localhost:3000",
-        description="允许的前端来源，逗号分隔",
+        description="允许的前端来源，逗号分隔（修改后需重启后端进程生效）",
     )
 
     # 应用元信息
@@ -63,7 +66,11 @@ class Settings(BaseSettings):
 
     @property
     def cors_origin_list(self) -> list[str]:
-        """将逗号分隔的 CORS_ORIGINS 解析为列表。"""
+        """将逗号分隔的 CORS_ORIGINS 解析为列表。
+
+        该列表在 main.py 启动期被 CORSMiddleware 固化；运行时修改 settings.cors_origins
+        不会自动传播到中间件，需重启进程后方可生效。
+        """
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
 
     class Config:

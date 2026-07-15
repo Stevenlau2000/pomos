@@ -218,9 +218,8 @@ export default function SettingsPanel(props: SettingsPanelProps) {
         const stu = await createStudent(payload);
         props.onStudentIdChange(stu.student_id);
         setStudentMsg("已创建学生并保存到后端 ✓");
-      } catch (e) {
+      } catch {
         setStudentMsg("仅保存到本地（后端不可达）");
-        if (typeof window !== "undefined") console.error(e);
       }
     }
     if (typeof window !== "undefined") {

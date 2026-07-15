@@ -4,6 +4,7 @@
 密钥写入后端 runtime_settings.json，进程重启后仍生效，且不会污染 .env。
 """
 import logging
+import uuid
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Request
@@ -47,18 +48,31 @@ async def put_settings(body: SettingsUpdate, request: Request) -> dict:
     """热更新配置并持久化，返回脱敏后的当前配置快照。
 
     落库前先做合法性校验，非法配置直接返回 422，避免脏配置写入 runtime_settings.json。
+
+    CORS 白名单说明：cors_origins 经本接口写入内存单例与 runtime_settings.json，
+    但 CORS 中间件在进程启动时已固化（Starlette CORSMiddleware 不支持运行时热改
+    allow_origins），故实际生效需重启后端进程。当请求体含 cors_origins 时，响应额外
+    返回 cors_origins_note 提示，前端应据此告知用户。
     """
     data = {k: v for k, v in body.model_dump().items() if v is not None}
     errors = validate_settings(data)
     if errors:
         raise HTTPException(status_code=422, detail={"errors": errors})
     try:
-        return apply_runtime_settings(data)
+        snapshot = apply_runtime_settings(data)
     except Exception as exc:  # noqa: BLE001
         request_id = getattr(request.state, "request_id", None) or str(uuid.uuid4())
         logger.exception("保存设置失败 request_id=%s", request_id)
         # 安全加固（P0-1）：对外只返回通用 500，不泄露内部异常原文
         raise HTTPException(status_code=500)
+
+    # CORS 白名单仅记录、不热改：提示需重启后端方可生效（中间件启动期固化）
+    if "cors_origins" in data:
+        snapshot = dict(snapshot)
+        snapshot["cors_origins_note"] = (
+            "CORS 白名单已记录，但需重启后端进程方可生效（CORS 中间件于启动时固化）"
+        )
+    return snapshot
 
 
 @router.post("/settings/test")

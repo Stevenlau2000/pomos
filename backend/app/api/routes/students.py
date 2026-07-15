@@ -21,8 +21,8 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app import models
-from app.models import SIX_RADAR, NINE_DIM_META
-from app.domain.assessment import twin_to_radar, readiness as compute_readiness, board_mastery as compute_board_mastery
+from app.models import NINE_DIM_META
+from app.domain.assessment import aggregate_assessment, board_mastery as compute_board_mastery
 from app.modules.training_plan import build_training_plan
 from app.schemas import (
     StudentCreate,
@@ -151,32 +151,24 @@ def update_student(
 
 @router.get("/students/{student_id}/assessment", response_model=AssessmentOut)
 def get_assessment(student_id: str, db: Session = Depends(get_db)) -> AssessmentOut:
-    """返回学生综合物理能力评估（HPCAS/PQ）。"""
+    """[已废弃] 返回学生综合物理能力评估（HPCAS/PQ）的公开只读快照。
+
+    ⚠️ 废弃声明：前端实际统一走 GET /api/students/{student_id}/dashboard；
+    新代码请勿使用本端点。此处保留仅作为公开 API。
+
+    实现直接复用 ``domain.assessment.aggregate_assessment`` 共享聚合，
+    与 /dashboard 保持行为完全一致，不再内联重复计算。
+    """
     s = db.get(models.Student, student_id)
     if s is None:
         raise HTTPException(status_code=404, detail="学生不存在")
 
-    record = _latest_assessment(db, student_id)
-    if record is not None:
-        return AssessmentOut(
-            pq=record.pq,
-            radar=record.radar or {k: 0.0 for k in SIX_RADAR},
-            growth_curve=record.growth_curve or [],
-            readiness=record.readiness or {
-                "province_top": 0.0,
-                "province_team": 0.0,
-                "ipho": 0.0,
-            },
-        )
-
-    twin = s.twin or {}
-    radar = twin_to_radar(twin)
-    pq = round(sum(radar.values()) / len(radar), 3) if radar else 0.0
+    agg = aggregate_assessment(db, s)
     return AssessmentOut(
-        pq=pq,
-        radar=radar,
-        growth_curve=[],
-        readiness={"province_top": 0.5, "province_team": 0.3, "ipho": 0.1},
+        pq=agg["pq"],
+        radar=agg["radar"],
+        growth_curve=agg["growth_curve"],
+        readiness=agg["readiness"],
     )
 
 
@@ -202,21 +194,15 @@ def get_dashboard(student_id: str, db: Session = Depends(get_db)) -> DashboardOu
         for dim in models.NINE_DIMS
     ]
 
-    record = _latest_assessment(db, student_id)
-    if record is not None:
-        pq = record.pq
-        radar = record.radar or twin_to_radar(twin)
-        growth_curve = record.growth_curve or []
-        readiness = record.readiness or compute_readiness(pq)
-        weak = record.weak_concepts or []
-        recs = record.recommendations or []
-    else:
-        radar = twin_to_radar(twin)
-        pq = round(sum(radar.values()) / len(radar), 3) if radar else 0.0
-        growth_curve = []
-        readiness = compute_readiness(pq)
-        weak = []
-        recs = []
+    # 核心评估聚合（pq / radar / growth_curve / readiness / weak / recs）
+    # 与 /assessment 端点共享同一份领域逻辑，避免重复计算与行为分叉。
+    agg = aggregate_assessment(db, s)
+    pq = agg["pq"]
+    radar = agg["radar"]
+    growth_curve = agg["growth_curve"]
+    readiness = agg["readiness"]
+    weak = agg["weak_concepts"]
+    recs = agg["recommendations"]
 
     # 由 twin 推导各板块掌握度（知识图谱着色用）
     board_mastery = compute_board_mastery(twin)
