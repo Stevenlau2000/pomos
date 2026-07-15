@@ -12,10 +12,18 @@ interface ChatViewProps {
   messages: ChatMessage[];
   loading: boolean;
   onSend: (text: string) => void;
+  /** 可选：视图卸载时中止正在进行的 SSE 流式连接。 */
+  onAbort?: () => void;
 }
 
-const ChatView: React.FC<ChatViewProps> = ({ messages, loading, onSend }) => {
+const ChatView: React.FC<ChatViewProps> = ({ messages, loading, onSend, onAbort }) => {
   const { t } = useI18n();
+  // 卸载时中止 SSE 流式连接，避免切视图后后台仍消耗带宽
+  React.useEffect(() => {
+    return () => {
+      onAbort?.();
+    };
+  }, [onAbort]);
   // 末条为导师错误气泡时，提供「重试」入口：重发最后一条用户消息
   const last = messages[messages.length - 1];
   const isError = !!last && last.role === "mentor" && last.content.startsWith("⚠️");

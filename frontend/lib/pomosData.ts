@@ -10,16 +10,31 @@ export interface TwinDimension {
   hint: string;
 }
 
+// 后端 canonical key → 前端展示信息映射
+// 后端 key 作为正典（与 backend/app/models.py NINE_DIMS 对齐），
+// 前端 label/hint 仅用于 UI 渲染。
+export const DIM_MAP: Record<string, { label: string; hint: string }> = {
+  concept: { label: "知识掌握", hint: "对物理概念与本质的掌握程度" },
+  modeling: { label: "物理建模", hint: "将现实情境抽象为物理模型的能力" },
+  reasoning: { label: "推理能力", hint: "因果演绎与逻辑链完整性" },
+  calculation: { label: "数学准备", hint: "微积分/矢量/级数等数学工具熟练度" },
+  experiment: { label: "实验探究", hint: "实验设计与误差分析能力" },
+  transfer: { label: "迁移能力", hint: "跨板块综合题（力电磁耦合）偏弱" },
+  meta: { label: "元认知", hint: "能自我监控解题卡点" },
+  competition: { label: "竞赛就绪", hint: "竞赛策略与压轴题经验" },
+  growth: { label: "成长态势", hint: "持续训练与提升趋势" },
+};
+
 export const NINE_DIMS: TwinDimension[] = [
-  { key: "knowledgeMastery", label: "知识掌握", value: 72, hint: "已覆盖竞赛大纲 72% 核心考点" },
-  { key: "physicsModelMastery", label: "物理建模", value: 64, hint: "能独立完成中等难度建模，复杂耦合偏弱" },
-  { key: "mathematicalReadiness", label: "数学准备", value: 81, hint: "微积分/矢量/级数工具熟练" },
-  { key: "reasoningAbility", label: "推理能力", value: 70, hint: "演绎链完整，归纳易跳步" },
-  { key: "learningBehavior", label: "学习行为", value: 85, hint: "日均有效训练 2.1h，错题复盘率 90%" },
-  { key: "motivationState", label: "动机状态", value: 78, hint: "目标清晰（冲击省队），近一周略有波动" },
-  { key: "olympiadReadiness", label: "竞赛就绪", value: 58, hint: "省一水平，省队临界" },
-  { key: "metacognition", label: "元认知", value: 66, hint: "能自我监控解题卡点" },
-  { key: "transferAbility", label: "迁移能力", value: 55, hint: "跨板块综合题（力电磁耦合）偏弱" },
+  { key: "concept", label: DIM_MAP.concept.label, value: 72, hint: DIM_MAP.concept.hint },
+  { key: "modeling", label: DIM_MAP.modeling.label, value: 64, hint: DIM_MAP.modeling.hint },
+  { key: "reasoning", label: DIM_MAP.reasoning.label, value: 70, hint: DIM_MAP.reasoning.hint },
+  { key: "calculation", label: DIM_MAP.calculation.label, value: 81, hint: DIM_MAP.calculation.hint },
+  { key: "experiment", label: DIM_MAP.experiment.label, value: 78, hint: DIM_MAP.experiment.hint },
+  { key: "transfer", label: DIM_MAP.transfer.label, value: 55, hint: DIM_MAP.transfer.hint },
+  { key: "meta", label: DIM_MAP.meta.label, value: 66, hint: DIM_MAP.meta.hint },
+  { key: "competition", label: DIM_MAP.competition.label, value: 58, hint: DIM_MAP.competition.hint },
+  { key: "growth", label: DIM_MAP.growth.label, value: 78, hint: DIM_MAP.growth.hint },
 ];
 
 // ---------- 知识图谱（六层：板块/主题/概念/模型/方法/误区）----------
@@ -286,7 +301,7 @@ export const MODULE_STATUS: Record<string, ModuleInfo> = {
   m01: { status: "stub", file: "backend/app/modules/m01_identity.py", note: "身份设定占位" },
   m02: { status: "stub", file: "backend/app/modules/m02_mission.py", note: "使命原则占位" },
   m03: { status: "stub", file: "backend/app/modules/m03_philosophy.py", note: "教学哲学占位" },
-  m04: { status: "live", file: "backend/app/chat.py + models.py", note: "九维 Student Twin 已接入编排与画像闭环" },
+  m04: { status: "live", file: "backend/app/modules/m04_student_model.py", note: "九维 Student Twin 已接入编排与画像闭环" },
   m05: { status: "live", file: "backend/app/modules/m05_diagnosis.py", note: "PCDF 八层 + 误区检测已实装" },
   m06: { status: "live", file: "backend/app/modules/m06_knowledge_graph.py", note: "知识图谱已在前端渲染（六层）" },
   m07: { status: "stub", file: "backend/app/modules/m07_physics_thinking.py", note: "物理思维管线占位" },

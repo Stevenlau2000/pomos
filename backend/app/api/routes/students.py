@@ -11,16 +11,18 @@ POST   /api/students/{student_id}/mistakes
 PATCH  /api/students/{student_id}/mistakes/{mid}
 DELETE /api/students/{student_id}/mistakes/{mid}
 """
+import logging
 import os
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app import models
-from app.models import SIX_RADAR, NINE_DIM_META, BOARD_MASTERY_MAP
+from app.models import SIX_RADAR, NINE_DIM_META
+from app.domain.assessment import twin_to_radar, readiness as compute_readiness, board_mastery as compute_board_mastery
 from app.modules.training_plan import build_training_plan
 from app.schemas import (
     StudentCreate,
@@ -38,10 +40,29 @@ from app.schemas import (
 )
 
 router = APIRouter(tags=["students"])
+logger = logging.getLogger(__name__)
 
 # 错题图片存储根目录（backend/uploads）
 UPLOAD_ROOT = Path(__file__).resolve().parent.parent.parent.parent / "uploads"
-_ALLOWED_EXT = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}
+
+# 安全加固（P0-2）：仅允许真实图片格式（PNG/JPEG）。扩展名直接取自此白名单，
+# 不接受用户自定义后缀，避免任意字节落盘或路径穿越。
+_ALLOWED_EXT = {".png", ".jpg", ".jpeg"}
+
+# 上传体积上限（MB）。用于请求头预检与读取上限，防止内存/磁盘 DoS。
+MAX_UPLOAD_MB = 10
+_MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
+
+# 图片文件魔数：用于校验文件内容真实格式，而非仅看扩展名。
+_PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
+_JPEG_MAGIC = b"\xff\xd8\xff"
+
+
+def _is_valid_image_magic(data: bytes) -> bool:
+    """校验文件头是否为 PNG/JPEG 魔数，拒绝伪装的可执行字节。"""
+    if len(data) < 3:
+        return False
+    return data.startswith(_PNG_MAGIC) or data.startswith(_JPEG_MAGIC)
 
 
 def _to_student_out(s: "models.Student") -> StudentOut:
@@ -62,25 +83,6 @@ def _latest_assessment(db: Session, student_id: str) -> "Optional[models.Assessm
         .order_by(models.Assessment.created_at.desc())
         .first()
     )
-
-
-def _twin_to_radar(twin: dict) -> dict:
-    return {
-        "knowledge": twin.get("concept", 0.0),
-        "modeling": twin.get("modeling", 0.0),
-        "scientific_thinking": twin.get("experiment", 0.0),
-        "transfer": twin.get("transfer", 0.0),
-        "competition": twin.get("competition", 0.0),
-        "growth": twin.get("growth", 0.0),
-    }
-
-
-def _readiness(pq: float) -> dict:
-    return {
-        "province_top": round(min(1.0, pq), 3),
-        "province_team": round(min(1.0, max(0.0, pq - 0.15)), 3),
-        "ipho": round(min(1.0, max(0.0, pq - 0.35)), 3),
-    }
 
 
 @router.post("/students", response_model=StudentOut)
@@ -168,7 +170,7 @@ def get_assessment(student_id: str, db: Session = Depends(get_db)) -> Assessment
         )
 
     twin = s.twin or {}
-    radar = _twin_to_radar(twin)
+    radar = twin_to_radar(twin)
     pq = round(sum(radar.values()) / len(radar), 3) if radar else 0.0
     return AssessmentOut(
         pq=pq,
@@ -203,24 +205,21 @@ def get_dashboard(student_id: str, db: Session = Depends(get_db)) -> DashboardOu
     record = _latest_assessment(db, student_id)
     if record is not None:
         pq = record.pq
-        radar = record.radar or _twin_to_radar(twin)
+        radar = record.radar or twin_to_radar(twin)
         growth_curve = record.growth_curve or []
-        readiness = record.readiness or _readiness(pq)
+        readiness = record.readiness or compute_readiness(pq)
         weak = record.weak_concepts or []
         recs = record.recommendations or []
     else:
-        radar = _twin_to_radar(twin)
+        radar = twin_to_radar(twin)
         pq = round(sum(radar.values()) / len(radar), 3) if radar else 0.0
         growth_curve = []
-        readiness = _readiness(pq)
+        readiness = compute_readiness(pq)
         weak = []
         recs = []
 
     # 由 twin 推导各板块掌握度（知识图谱着色用）
-    board_mastery = {}
-    for board, dims in BOARD_MASTERY_MAP.items():
-        vals = [float(twin.get(d, 0.0)) for d in dims]
-        board_mastery[board] = round(sum(vals) / len(vals), 3) if vals else 0.0
+    board_mastery = compute_board_mastery(twin)
 
     return DashboardOut(
         student_id=s.student_id,
@@ -380,9 +379,17 @@ async def upload_mistake_image(
     student_id: str,
     mid: str,
     file: UploadFile = File(...),
+    request: Request = None,
     db: Session = Depends(get_db),
 ) -> dict:
-    """上传该错题的题目原图（png/jpg/...），保存后返回可访问的相对 URL。"""
+    """上传该错题的题目原图（png/jpg），保存后返回可访问的相对 URL。
+
+    安全加固（P0-2）：
+    - 扩展名仅接受白名单（png/jpg/jpeg），不在白名单直接 400 拒绝；
+    - 读取前校验 content-length，超限直接 400 拒绝（避免先读满内存）；
+    - 分块读取并限制最大字节数，杜绝大文件打满内存/磁盘（DoS）；
+    - 校验文件头魔数，确认是真实 PNG/JPEG，拒绝伪装字节。
+    """
     s = db.get(models.Student, student_id)
     if s is None:
         raise HTTPException(status_code=404, detail="学生不存在")
@@ -394,16 +401,47 @@ async def upload_mistake_image(
     if m is None:
         raise HTTPException(status_code=404, detail="错题不存在")
 
+    # 1) 扩展名白名单校验：不在白名单直接拒绝，绝不回退改名
     raw_name = file.filename or "image"
     _, ext = os.path.splitext(raw_name)
     ext = ext.lower()
     if ext not in _ALLOWED_EXT:
-        ext = ".png"
-    UPLOAD_ROOT.mkdir(parents=True, exist_ok=True)
-    fname = f"{mid}{ext}"
-    content = await file.read()
+        raise HTTPException(status_code=400, detail="不支持的文件类型")
+
+    # 2) 请求头 content-length 预检：超限直接拒绝（避免先把大文件读进内存）
+    if request is not None:
+        content_length = request.headers.get("content-length")
+        if content_length is not None:
+            try:
+                if int(content_length) > _MAX_UPLOAD_BYTES:
+                    raise HTTPException(status_code=400, detail="文件体积超出上限")
+            except ValueError:
+                raise HTTPException(status_code=400, detail="非法请求头")
+
+    # 3) 分块读取并限制最大字节数；多读 1 字节探测是否超限
+    chunks: list[bytes] = []
+    read = 0
+    while read < _MAX_UPLOAD_BYTES:
+        buf = await file.read(min(65536, _MAX_UPLOAD_BYTES - read))
+        if not buf:
+            break
+        chunks.append(buf)
+        read += len(buf)
+    if await file.read(1):
+        raise HTTPException(status_code=400, detail="文件体积超出上限")
+    content = b"".join(chunks)
     if not content:
         raise HTTPException(status_code=400, detail="文件为空")
+
+    # 4) 魔数校验：确认内容确为 PNG/JPEG，而非伪装的可执行字节
+    if not _is_valid_image_magic(content):
+        raise HTTPException(status_code=400, detail="文件内容不是合法的图片")
+
+    # 5) 落盘：ext 来自白名单集合（安全），mid 为路径参数不含路径分隔符
+    #    部署提示：uploads 目录应配置为禁止脚本执行（如 Nginx 不对 /uploads
+    #    走 PHP/Python 解析），避免上传文件被当作代码执行。
+    UPLOAD_ROOT.mkdir(parents=True, exist_ok=True)
+    fname = f"{mid}{ext}"
     (UPLOAD_ROOT / fname).write_bytes(content)
     m.image_path = f"/uploads/{fname}"
     db.commit()

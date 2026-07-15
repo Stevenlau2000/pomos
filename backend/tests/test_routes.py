@@ -143,14 +143,14 @@ def test_memory_isolation_and_cap():
 
 def test_growth_curve_capped(db_session):
     """Assessment.growth_curve 应被裁剪到 GROWTH_CURVE_MAX，避免无限增长。"""
-    from app.api.routes.chat import _apply_student_update, GROWTH_CURVE_MAX
+    from app.domain.assessment import apply_student_update, GROWTH_CURVE_MAX
     from app import models
 
     sid = "stu_gc"
     db_session.add(models.Student(student_id=sid, name="gc"))
     db_session.commit()
     for i in range(GROWTH_CURVE_MAX + 100):
-        _apply_student_update(
+        apply_student_update(
             db_session,
             sid,
             {

@@ -11,7 +11,6 @@
 // 所有导出函数签名与 lib/api.ts 完全一致，api.ts 据 MODE 自动路由。
 
 import type {
-  Assessment,
   CreateStudentRequest,
   DailyPlan,
   Dashboard,
@@ -283,17 +282,17 @@ function getSettingsStore(): SettingsResponse {
 
 // ---------------------------------------------------------------- 确定性 mock 数据
 const NINE_DIMS: { key: string; label: string; hint: string }[] = [
-  { key: "mech", label: "力学直觉", hint: "对受力、运动与约束的物理图像感" },
-  { key: "em", label: "电磁素养", hint: "场、路、电磁感应的一体化理解" },
-  { key: "thermo", label: "热学", hint: "宏观态与微观统计的桥接" },
-  { key: "optics", label: "光学", hint: "几何与波动光学的转化" },
-  { key: "modern", label: "近代物理", hint: "相对论与量子的非经典直觉" },
-  { key: "math", label: "数学工具", hint: "微积分、矢量与方程的熟练度" },
+  { key: "concept", label: "概念理解", hint: "对物理概念与本质的掌握程度" },
   { key: "modeling", label: "建模能力", hint: "把现实问题翻译为物理模型" },
-  { key: "experiment", label: "实验素养", hint: "误差、图像与数据处理" },
-  { key: "strategy", label: "竞赛策略", hint: "时间分配与难题取舍" },
+  { key: "reasoning", label: "推理能力", hint: "因果演绎与逻辑链完整性" },
+  { key: "calculation", label: "计算能力", hint: "数学求解与数值处理规范" },
+  { key: "experiment", label: "实验探究", hint: "误差、图像与数据处理" },
+  { key: "transfer", label: "迁移能力", hint: "跨情境类比与综合应用" },
+  { key: "meta", label: "元认知", hint: "自我监控与错题反思" },
+  { key: "competition", label: "竞赛素养", hint: "竞赛策略与压轴题经验" },
+  { key: "growth", label: "成长态势", hint: "持续训练与提升趋势" },
 ];
-const BOARDS = ["力学", "电磁学", "热学", "光学", "近代物理", "数学方法"];
+const BOARDS = ["力学", "电磁学", "热学", "光学", "近代物理"];
 const WEAK_POOL = [
   "转动参考系下的惯性力处理",
   "非静电力做功的符号约定",
@@ -436,13 +435,6 @@ export function deleteStudent(studentId: string): Promise<{ ok: boolean }> {
   return Promise.resolve({ ok: true });
 }
 
-export function getStudent(studentId: string): Promise<Student> {
-  const s = findStudent(studentId);
-  return s
-    ? Promise.resolve(s)
-    : Promise.reject(new Error("学生不存在（离线）"));
-}
-
 export function updateStudent(
   studentId: string,
   data: { name?: string; grade?: string },
@@ -493,16 +485,6 @@ export async function streamChat(
   bumpPq(input.student_id, upd.pq);
 
   handlers.onDone?.({ session_id: `off_${Date.now()}` });
-}
-
-export function getAssessment(studentId: string): Promise<Assessment> {
-  const d = mockDashboard(studentId);
-  return Promise.resolve({
-    pq: d.pq,
-    radar: d.radar,
-    growth_curve: d.growth_curve,
-    readiness: d.readiness,
-  });
 }
 
 export function getDashboard(studentId: string): Promise<Dashboard> {

@@ -94,6 +94,8 @@ function WorkspaceInner() {
   const [student, setStudent] = React.useState<{ name: string; grade: string }>(
     () => loadStudent(),
   );
+  // SSE 流式连接的生命周期控制：切视图或重入时中止上一个请求
+  const abortRef = React.useRef<AbortController | null>(null);
 
   // 拉取后端健康状态，反映真实模型接入情况（多供应商）
   React.useEffect(() => {
@@ -137,6 +139,11 @@ function WorkspaceInner() {
   };
 
   const handleSend = async (text: string) => {
+    // 重入时中止上一个流式连接（避免并发 SSE 造成状态混乱）
+    abortRef.current?.abort();
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
+
     const userMsg: ChatMessage = { role: "user", content: text };
     const placeholder: ChatMessage = { role: "mentor", content: "" };
     setMessages((prev) => [...prev, userMsg, placeholder]);
@@ -184,8 +191,11 @@ function WorkspaceInner() {
             });
           },
         },
+        ctrl.signal,
       );
     } catch (e) {
+      // AbortError 是主动中止（切视图 / 重入），静默忽略
+      if (e instanceof DOMException && e.name === "AbortError") return;
       setMessages((prev) => {
         const copy = [...prev];
         copy[copy.length - 1] = {
@@ -280,7 +290,14 @@ function WorkspaceInner() {
   const renderView = () => {
     switch (view) {
       case "chat":
-        return <ChatView messages={messages} loading={loading} onSend={handleSend} />;
+        return (
+          <ChatView
+            messages={messages}
+            loading={loading}
+            onSend={handleSend}
+            onAbort={() => abortRef.current?.abort()}
+          />
+        );
       case "overview":
         return <OverviewView studentId={studentId} refreshKey={refreshKey} />;
       case "twin":

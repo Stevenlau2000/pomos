@@ -11,25 +11,23 @@
 from __future__ import annotations
 
 import json
-import time
-import uuid
+import logging
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app import models
-from app.models import SIX_RADAR
 from app.memory import remember_turn
 from app.orchestrator import run_orchestrator, stream_orchestrator
 from app.schemas import ChatRequest, ChatHistoryResponse, HistoryItem
+from app.domain.assessment import twin_to_radar, readiness, apply_student_update
 
 router = APIRouter(tags=["chat"])
 
-# growth_curve 最多保留的采样点数（防止长生命周期下 Assessment 行无限膨胀）
-GROWTH_CURVE_MAX = 200
+logger = logging.getLogger(__name__)
 
 
 def _sse(event: str, data: dict) -> str:
@@ -37,61 +35,8 @@ def _sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
-def _twin_to_radar(twin: dict) -> dict:
-    """九维 Student Twin -> 六维 HPCAS 雷达（映射见 m14 规范）。"""
-    return {
-        "knowledge": twin.get("concept", 0.0),
-        "modeling": twin.get("modeling", 0.0),
-        "scientific_thinking": twin.get("experiment", 0.0),
-        "transfer": twin.get("transfer", 0.0),
-        "competition": twin.get("competition", 0.0),
-        "growth": twin.get("growth", 0.0),
-    }
-
-
-def _readiness(pq: float) -> dict:
-    """由 PQ 推导省队/国家队的就绪度估算（启发式，0~1）。"""
-    return {
-        "province_top": round(min(1.0, pq), 3),
-        "province_team": round(min(1.0, max(0.0, pq - 0.15)), 3),
-        "ipho": round(min(1.0, max(0.0, pq - 0.35)), 3),
-    }
-
-
-def _apply_student_update(db: Session, student_id: str, update: dict) -> None:
-    """将 student_update 累加到九维画像并 upsert Assessment。"""
-    if not update:
-        return
-    student = db.get(models.Student, student_id)
-    if student is None:
-        return
-    twin = dict(student.twin or {dim: 0.0 for dim in models.NINE_DIMS})
-    for dim, delta in (update.get("mastery_delta") or {}).items():
-        if dim in twin:
-            twin[dim] = round(min(1.0, max(0.0, twin[dim] + float(delta))), 3)
-    student.twin = twin
-
-    pq = float(update.get("pq", 0.0))
-    rec = (
-        db.query(models.Assessment)
-        .filter(models.Assessment.student_id == student_id)
-        .order_by(models.Assessment.created_at.desc())
-        .first()
-    )
-    if rec is None:
-        rec = models.Assessment(student_id=student_id)
-        db.add(rec)
-    rec.pq = pq
-    rec.radar = _twin_to_radar(twin)
-    curve = (rec.growth_curve or []) + [{"ts": int(time.time()), "pq": pq}]
-    rec.growth_curve = curve[-GROWTH_CURVE_MAX:]  # 限长，仅保留最近采样
-    rec.readiness = _readiness(pq)
-    rec.weak_concepts = (update.get("weak_concepts") or [])[:5]
-    rec.recommendations = (update.get("recommendations") or [])[:5]
-
-
 @router.post("/chat")
-async def chat(req: ChatRequest, db: Session = Depends(get_db)) -> dict:
+async def chat(req: ChatRequest, request: Request, db: Session = Depends(get_db)) -> dict:
     """接收学生消息，经 Runtime Orchestrator 编排后返回回复与调用轨迹，并落库。"""
     # 确保学生存在（前端可能尚未在设置里保存画像），否则懒建默认学生，
     # 这样对话历史与评估才能落库，闭合自适应闭环。
@@ -108,7 +53,12 @@ async def chat(req: ChatRequest, db: Session = Depends(get_db)) -> dict:
             req.student_id, req.message, req.session_id, twin=twin
         )
     except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=500, detail=str(exc))
+        request_id = getattr(request.state, "request_id", None) or str(uuid.uuid4())
+        logger.exception(
+            "对话编排失败 student_id=%s request_id=%s", req.student_id, request_id
+        )
+        # 安全加固（P0-1）：对外只返回通用 500，不泄露内部异常原文
+        raise HTTPException(status_code=500)
 
     session_id = result["session_id"]
     db.add(models.Message(
@@ -120,13 +70,13 @@ async def chat(req: ChatRequest, db: Session = Depends(get_db)) -> dict:
         role="assistant", content=result["reply"],
     ))
     remember_turn(req.student_id, "assistant", result["reply"])
-    _apply_student_update(db, req.student_id, result.get("student_update"))
+    apply_student_update(db, req.student_id, result.get("student_update"))
     db.commit()
     return result
 
 
 @router.post("/chat/stream")
-async def chat_stream(req: ChatRequest, db: Session = Depends(get_db)) -> StreamingResponse:
+async def chat_stream(req: ChatRequest, request: Request, db: Session = Depends(get_db)) -> StreamingResponse:
     """SSE 流式对话：逐字推送导师回复，结束前完成消息落库与自适应闭环更新。
 
     事件流：meta -> delta×N -> assessment -> done。
@@ -141,6 +91,8 @@ async def chat_stream(req: ChatRequest, db: Session = Depends(get_db)) -> Stream
         db.flush()
     twin = dict(student.twin or {dim: 0.0 for dim in models.NINE_DIMS})
     remember_turn(req.student_id, "user", req.message)
+
+    request_id = getattr(request.state, "request_id", None) or str(uuid.uuid4())
 
     async def event_generator():
         final = None
@@ -173,7 +125,12 @@ async def chat_stream(req: ChatRequest, db: Session = Depends(get_db)) -> Stream
                     yield _sse("done", {"session_id": ev.get("session_id")})
         except Exception as exc:  # noqa: BLE001
             errored = True
-            yield _sse("error", {"detail": str(exc)})
+            logger.exception(
+                "SSE 对话流异常 student_id=%s request_id=%s",
+                req.student_id, request_id,
+            )
+            # 安全加固（P0-1）：SSE 错误事件只给通用提示，绝不透传异常原文
+            yield _sse("error", {"detail": "服务内部错误"})
             return
 
         # 落库：无论正常结束还是客户端中途断开（GeneratorExit），都尽量持久化，
@@ -191,7 +148,7 @@ async def chat_stream(req: ChatRequest, db: Session = Depends(get_db)) -> Stream
                     student_id=req.student_id, session_id=final["session_id"],
                     role="assistant", content=final["reply"],
                 ))
-                _apply_student_update(db, req.student_id, final.get("student_update"))
+                apply_student_update(db, req.student_id, final.get("student_update"))
                 db.commit()
             elif collected_reply:
                 # 客户端中途断开：用已累积内容兜底落库
@@ -205,7 +162,7 @@ async def chat_stream(req: ChatRequest, db: Session = Depends(get_db)) -> Stream
                     student_id=req.student_id, session_id=persist_sid,
                     role="assistant", content=collected_reply,
                 ))
-                _apply_student_update(db, req.student_id, collected_update or {})
+                apply_student_update(db, req.student_id, collected_update or {})
                 db.commit()
         except Exception:  # noqa: BLE001
             # 落库失败不应影响响应关闭

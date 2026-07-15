@@ -3,15 +3,17 @@
 前端「设置面板」通过此接口读取与保存配置（语言、API Key、模型、温度等）。
 密钥写入后端 runtime_settings.json，进程重启后仍生效，且不会污染 .env。
 """
+import logging
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from app.config import apply_runtime_settings, serialize_settings, validate_settings
 from app.llm import probe_connection
 
 router = APIRouter(tags=["settings"])
+logger = logging.getLogger(__name__)
 
 
 class SettingsUpdate(BaseModel):
@@ -41,7 +43,7 @@ async def get_settings() -> dict:
 
 
 @router.put("/settings")
-async def put_settings(body: SettingsUpdate) -> dict:
+async def put_settings(body: SettingsUpdate, request: Request) -> dict:
     """热更新配置并持久化，返回脱敏后的当前配置快照。
 
     落库前先做合法性校验，非法配置直接返回 422，避免脏配置写入 runtime_settings.json。
@@ -53,7 +55,10 @@ async def put_settings(body: SettingsUpdate) -> dict:
     try:
         return apply_runtime_settings(data)
     except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=500, detail=str(exc))
+        request_id = getattr(request.state, "request_id", None) or str(uuid.uuid4())
+        logger.exception("保存设置失败 request_id=%s", request_id)
+        # 安全加固（P0-1）：对外只返回通用 500，不泄露内部异常原文
+        raise HTTPException(status_code=500)
 
 
 @router.post("/settings/test")

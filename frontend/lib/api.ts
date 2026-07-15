@@ -122,14 +122,6 @@ export interface Readiness {
   ipho: number;
 }
 
-/** 测评返回 */
-export interface Assessment {
-  pq: number;
-  radar: PqRadar;
-  growth_curve: GrowthPoint[];
-  readiness: Readiness;
-}
-
 /** 九维画像单维（后端返回 0~1 归一化） */
 export interface NineDim {
   key: string;
@@ -197,7 +189,41 @@ export interface MistakeCreate {
 
 // ---------- 底层 fetch 封装 ----------
 
+/** 请求去重缓存：同 key 并行请求共享同一 Promise，避免重复发相同请求。 */
+const _requestCache = new Map<string, Promise<unknown>>();
+
+function _cacheKey(path: string, init?: RequestInit): string {
+  const method = init?.method ?? "GET";
+  const body = typeof init?.body === "string" ? init.body : JSON.stringify(init?.body ?? "");
+  return `${method}:${path}:${body}`;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  // 若调用方通过 X-No-Cache 头要求绕过缓存，直接发起网络请求
+  const noCache = init?.headers &&
+    typeof init.headers === "object" &&
+    !Array.isArray(init.headers) &&
+    "X-No-Cache" in (init.headers as Record<string, string>);
+
+  if (!noCache) {
+    const key = _cacheKey(path, init);
+    const pending = _requestCache.get(key);
+    if (pending) {
+      return pending as Promise<T>;
+    }
+    const promise = _doFetch<T>(path, init);
+    _requestCache.set(key, promise);
+    // 无论成功失败，请求结束后清除缓存
+    promise.finally(() => {
+      _requestCache.delete(key);
+    });
+    return promise;
+  }
+
+  return _doFetch<T>(path, init);
+}
+
+async function _doFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
     ...init,
@@ -239,12 +265,6 @@ export function deleteStudent(studentId: string): Promise<{ ok: boolean }> {
   });
 }
 
-/** 获取学生画像 */
-export function getStudent(studentId: string): Promise<Student> {
-  if (offlineMode()) return offline.getStudent(studentId);
-  return request<Student>(`/api/students/${encodeURIComponent(studentId)}`);
-}
-
 /** 发送对话消息 */
 export function sendChat(input: SendChatRequest): Promise<SendChatResponse> {
   if (offlineMode()) return offline.sendChat(input);
@@ -274,14 +294,23 @@ export interface StreamHandlers {
   onError?: (detail: string) => void;
 }
 
-/** 发起流式对话，手动解析 SSE 流（EventSource 仅支持 GET，故用 fetch + ReadableStream）。 */
-export async function streamChat(input: SendChatRequest, handlers: StreamHandlers): Promise<void> {
+/** 发起流式对话，手动解析 SSE 流（EventSource 仅支持 GET，故用 fetch + ReadableStream）。
+ *
+ * @param signal - 可选的 AbortSignal，用于从外部中止流式连接（如切视图时）。
+ *                 调用方可传入 AbortController.signal 统一管理多个连接的生命周期。
+ */
+export async function streamChat(
+  input: SendChatRequest,
+  handlers: StreamHandlers,
+  signal?: AbortSignal,
+): Promise<void> {
   if (offlineMode()) return offline.streamChat(input, handlers);
 
   const res = await fetch(`${API_BASE}/api/chat/stream`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input),
+    signal,
   });
   if (!res.ok || !res.body) {
     handlers.onError?.(`请求失败 ${res.status}`);
@@ -327,14 +356,6 @@ export async function streamChat(input: SendChatRequest, handlers: StreamHandler
       else if (event === "error") handlers.onError?.(String(payload.detail ?? "stream error"));
     }
   }
-}
-
-/** 获取学生测评数据 */
-export function getAssessment(studentId: string): Promise<Assessment> {
-  if (offlineMode()) return offline.getAssessment(studentId);
-  return request<Assessment>(
-    `/api/students/${encodeURIComponent(studentId)}/assessment`,
-  );
 }
 
 /** 更新学生画像（姓名 / 年级） */
