@@ -269,23 +269,50 @@ export const LAYER_META: Record<PomosLayer, { label: string; color: string; blur
 };
 
 export const MODULES: PomosModule[] = [
-  { id: "m01", code: "01", name: "Identity System", layer: "Persona", desc: "导师身份与人格设定" },
-  { id: "m02", code: "02", name: "Mission & Principles", layer: "Persona", desc: "使命与核心原则" },
-  { id: "m03", code: "03", name: "Teaching Philosophy", layer: "Persona", desc: "先物理后公式等教学信条" },
-  { id: "m04", code: "04", name: "Student Modeling", layer: "Cognitive", desc: "学生数字孪生（九维）" },
-  { id: "m05", code: "05", name: "Cognitive Diagnosis", layer: "Cognitive", desc: "PCDF 八层认知诊断" },
-  { id: "m06", code: "06", name: "Knowledge Graph", layer: "Knowledge", desc: "六层物理知识图谱" },
+  { id: "m01", code: "01", name: "Identity System", layer: "Persona", desc: "导师身份与人格设定（CPhO/IPhO）" },
+  { id: "m02", code: "02", name: "Mission & Principles", layer: "Persona", desc: "使命与首性原理等核心原则" },
+  { id: "m03", code: "03", name: "Teaching Philosophy", layer: "Persona", desc: "苏格拉底式+脚手架+元认知信条" },
+  { id: "m04", code: "04", name: "Student Modeling", layer: "Cognitive", desc: "学生数字孪生 Student Twin（九维）" },
+  { id: "m05", code: "05", name: "Cognitive Diagnosis", layer: "Cognitive", desc: "PCDF 八层认知诊断与误区检测" },
+  { id: "m06", code: "06", name: "Knowledge Graph", layer: "Knowledge", desc: "六层物理知识图谱（后端待实现）" },
   { id: "m07", code: "07", name: "Physics Thinking", layer: "Knowledge", desc: "十阶段物理思维管线" },
-  { id: "m08", code: "08", name: "Teaching Strategy", layer: "Teaching", desc: "六模式 + 五级 Hint" },
-  { id: "m09", code: "09", name: "Olympiad Problem Intel.", layer: "Teaching", desc: "OPIE 竞赛题解码" },
-  { id: "m10", code: "10", name: "Adaptive Coaching", layer: "Teaching", desc: "AOCS 周期训练" },
-  { id: "m11", code: "11", name: "Scientific Inquiry", layer: "Teaching", desc: "SIEE 实验探究" },
-  { id: "m12", code: "12", name: "Learning Orchestration", layer: "Teaching", desc: "ALOE 学习调度" },
-  { id: "m13", code: "13", name: "Memory OS", layer: "Runtime", desc: "CMOS 六层记忆 + DNA" },
-  { id: "m14", code: "14", name: "Competency Assessment", layer: "Runtime", desc: "HPCAS · 物理商 PQ" },
-  { id: "m15", code: "15", name: "Multimodal Intel.", layer: "Runtime", desc: "UMLIE 多模态识别" },
-  { id: "m16", code: "16", name: "Runtime Orchestrator", layer: "Runtime", desc: "系统大脑 · 统一编排" },
+  { id: "m08", code: "08", name: "Teaching Strategy", layer: "Teaching", desc: "六模式 + 五级 Hint 教学策略" },
+  { id: "m09", code: "09", name: "Olympiad Problem Intel.", layer: "Teaching", desc: "OPIE 竞赛题检索/生成/解析" },
+  { id: "m10", code: "10", name: "Adaptive Coaching", layer: "Teaching", desc: "AOCS 单题多轮自适应教练" },
+  { id: "m11", code: "11", name: "Scientific Inquiry", layer: "Teaching", desc: "SIEE 实验设计与误差探究" },
+  { id: "m12", code: "12", name: "Learning Orchestration", layer: "Teaching", desc: "ALOE 排程与学习路径规划" },
+  { id: "m13", code: "13", name: "Memory OS", layer: "Runtime", desc: "CMOS 六层记忆（按学生隔离）" },
+  { id: "m14", code: "14", name: "Competency Assessment", layer: "Runtime", desc: "HPCAS · 物理商 PQ 评估" },
+  { id: "m15", code: "15", name: "Multimodal Intel.", layer: "Runtime", desc: "UMLIE 题目图片/公式多模态" },
+  { id: "m16", code: "16", name: "Runtime Orchestrator", layer: "Runtime", desc: "LangGraph 统一编排系统大脑" },
 ];
+
+// ---------- 模块详细内容（模块地图详情面板）----------
+export interface ModuleDetail {
+  role: string;   // 核心职责详述（1-2 句）
+  methods: string[]; // 关键算法/框架/能力点
+  io: string;     // 输入 → 输出
+  deps: string[]; // 依赖模块 id（如 ["m04","m05"]）
+}
+
+export const MODULE_DETAIL: Record<string, ModuleDetail> = {
+  m01: { role: "定义 POMOS 作为物理竞赛导师的身份、口吻与服务边界（CPhO/IPhO 导向）。", methods: ["静态 persona 字典（身份/口吻/边界）", "CPhO/IPhO 竞赛语境设定"], io: "配置 → 导师人格设定", deps: ["m02","m03"] },
+  m02: { role: "阐明培养物理直觉与建模能力的使命，以及首性原理等核心原则。", methods: ["使命陈述", "首性原理 / 少即是多等原则清单"], io: "配置 → 使命与原则", deps: ["m01"] },
+  m03: { role: "确立「先物理后公式」、苏格拉底式提问 + 脚手架 + 元认知的教学信条。", methods: ["苏格拉底式提问", "脚手架递进", "元认知反思"], io: "配置 → 教学哲学信条", deps: ["m02"] },
+  m04: { role: "维护学生数字孪生 Student Twin，刻画 concept/modeling 等九维能力画像。", methods: ["九维 Student Twin", "twin_to_radar 降维聚合", "apply_student_update 增量更新"], io: "做题/训练记录 → 九维分数 + 雷达画像", deps: ["m05","m14"] },
+  m05: { role: "基于 PCDF 八层认知模型诊断学生，检测错误概念并定位卡点层级。", methods: ["PCDF 八层诊断", "detect_misconceptions 误区检测", "严重度/根因/复发率标注"], io: "作答与错题 → 八层分数 + 误区清单", deps: ["m04","m14"] },
+  m06: { role: "构建六层物理知识图谱（概念/关系/方法/情境/条件/反例），支撑薄弱点定位。", methods: ["六层 KG（板块/主题/概念/模型/方法/误区）", "prerequisite/transfer 关系边", "前端 demo 渲染节点与边"], io: "物理知识库 → 图谱节点 + 关系（后端未实现，当前返回硬编码示范节点）", deps: ["m04"] },
+  m07: { role: "十阶段物理思维管线，引导学生从物理图像到数学表达的系统化推演。", methods: ["十阶段思维链（表征→图像→模型→数学映射→求解→检验→概念→迁移）", "思维过程可视化"], io: "题目/思路 → 分步思维轨迹", deps: ["m05","m06"] },
+  m08: { role: "六教学模式 + 五级 Hint，按学情自动选择讲解/追问/类比等策略。", methods: ["六教学模式（讲授/探究/支架/对练/复盘/拓展）", "五级 Hint 递进提示", "策略路由"], io: "学情 + 目标 → 教学策略与提示序列", deps: ["m05","m12"] },
+  m09: { role: "OPIE 竞赛题智能检索/生成/改编与解析，提供高质量题源。", methods: ["OPIE 竞赛题解码（考点/难度/解法映射）", "题源检索与改编", "解析生成"], io: "考点/难度需求 → 竞赛题 + 解析", deps: ["m06","m14"] },
+  m10: { role: "AOCS 自适应教练，单题多轮引导与即时反馈，按掌握度动态调整。", methods: ["AOCS 自适应周期（诊断→引导→反馈→强化）", "多轮 Socratic 追问", "掌握度驱动的步进取舍"], io: "学生 + 题目 → 自适应引导对话", deps: ["m05","m08","m12"] },
+  m11: { role: "SIEE 实验探究，支持实验设计、误差分析与数据处理。", methods: ["SIEE 探究流程（提问→假设→设计→实施→解释）", "误差分析与不确定度", "数据拟合/可视化"], io: "实验目标 → 探究方案 + 误差报告", deps: ["m06","m07"] },
+  m12: { role: "ALOE 学习编排，负责排程、复习曲线与个性化学习路径规划。", methods: ["ALOE 学习调度（优先级评分）", "艾宾浩斯复习曲线", "周计划/日计划生成"], io: "学情 + 目标 → 学习计划与排程", deps: ["m05","m10"] },
+  m13: { role: "CMOS 六层记忆系统，按学生隔离存储并支持巩固与检索。", methods: ["CMOS 六层（sensory/working/episodic/semantic/procedural/metacognitive）", "多租户分片（get_memory/remember_turn）", "write/read/append/snapshot"], io: "对话/事件 → 六层记忆存取与巩固", deps: ["m16"] },
+  m14: { role: "HPCAS 物理商 PQ 评估，九维加权出 PQ、雷达、成长曲线与就绪度。", methods: ["HPCAS 物理商 PQ", "九维加权 compute_assessment", "雷达六轴 + 成长曲线 + 省队/IPhO 就绪度"], io: "九维画像 → PQ 分数 + 雷达 + 就绪度", deps: ["m04","m05"] },
+  m15: { role: "UMLIE 多模态识别，解析题目图片/手绘/公式 OCR 与图表理解。", methods: ["题目图片/手绘 OCR", "公式识别（LaTeX）", "图表/示意图理解"], io: "图片/手写 → 结构化题目文本", deps: ["m06","m14"] },
+  m16: { role: "LangGraph 统一编排大脑，意图分发 → 模块调度 → 响应装配。", methods: ["LangGraph 状态图（classify→dispatch→assemble→assess）", "无 langgraph 退化链", "模块路由与上下文装配"], io: "用户请求 → 编排后的响应", deps: ["m01","m02","m03","m04","m05","m06","m07","m08","m09","m10","m11","m12","m13","m14","m15"] },
+};
 
 // ---------- 模块实现状态登记（如实反映运行时接线情况）----------
 // live = 已在 POMOS 运行时真正接好并可工作；stub = 架构占位，待实装。
@@ -298,22 +325,22 @@ export interface ModuleInfo {
 }
 
 export const MODULE_STATUS: Record<string, ModuleInfo> = {
-  m01: { status: "stub", file: "backend/app/modules/m01_identity.py", note: "身份设定占位" },
-  m02: { status: "stub", file: "backend/app/modules/m02_mission.py", note: "使命原则占位" },
-  m03: { status: "stub", file: "backend/app/modules/m03_philosophy.py", note: "教学哲学占位" },
-  m04: { status: "live", file: "backend/app/modules/m04_student_model.py", note: "九维 Student Twin 已接入编排与画像闭环" },
-  m05: { status: "live", file: "backend/app/modules/m05_diagnosis.py", note: "PCDF 八层 + 误区检测已实装" },
-  m06: { status: "live", file: "backend/app/modules/m06_knowledge_graph.py", note: "知识图谱已在前端渲染（六层）" },
-  m07: { status: "stub", file: "backend/app/modules/m07_physics_thinking.py", note: "物理思维管线占位" },
-  m08: { status: "stub", file: "backend/app/modules/m08_teaching_strategy.py", note: "六模式 + 五级 Hint 占位" },
-  m09: { status: "stub", file: "backend/app/modules/m09_olympiad_problem.py", note: "OPIE 竞赛题解码占位" },
-  m10: { status: "stub", file: "backend/app/modules/m10_olympiad_coaching.py", note: "AOCS 自适应教练占位" },
-  m11: { status: "stub", file: "backend/app/modules/m11_scientific_inquiry.py", note: "SIEE 实验探究占位" },
-  m12: { status: "stub", file: "backend/app/modules/m12_learning_orchestration.py", note: "ALOE 学习编排占位" },
-  m13: { status: "live", file: "backend/app/memory.py", note: "CMOS 六层记忆已实装" },
-  m14: { status: "live", file: "backend/app/modules/assessment_engine.py", note: "HPCAS · 物理商 PQ 评估引擎已实装" },
-  m15: { status: "stub", file: "backend/app/modules/m15_multimodal.py", note: "UMLIE 多模态识别占位" },
-  m16: { status: "live", file: "backend/app/orchestrator.py", note: "LangGraph 统一编排大脑已实装" },
+  m01: { status: "stub", file: "backend/app/modules/m01_identity.py", note: "导师身份/口吻/服务边界设定（静态字典）" },
+  m02: { status: "stub", file: "backend/app/modules/m02_mission.py", note: "使命与首性原理原则（静态字典）" },
+  m03: { status: "stub", file: "backend/app/modules/m03_philosophy.py", note: "苏格拉底式+脚手架+元认知教学信条（静态字典）" },
+  m04: { status: "live", file: "backend/app/modules/m04_student_model.py", note: "九维 Student Twin 已接入编排与画像闭环（growth 增量含硬编码基线，待接真实成长模型）" },
+  m05: { status: "live", file: "backend/app/modules/m05_diagnosis.py", note: "PCDF 八层 + detect_misconceptions 误区检测已实装，输出八层分数与 bug 清单" },
+  m06: { status: "stub", file: "backend/app/modules/m06_knowledge_graph.py", note: "六层图谱前端 demo 已渲染（KG_NODES/KG_LINKS），后端图谱逻辑未实现，当前返回硬编码示范节点" },
+  m07: { status: "stub", file: "backend/app/modules/m07_physics_thinking.py", note: "十阶段物理思维管线规划中：从物理图像到数学表达的系统化推演" },
+  m08: { status: "stub", file: "backend/app/modules/m08_teaching_strategy.py", note: "六模式+五级 Hint 教学策略规划中" },
+  m09: { status: "stub", file: "backend/app/modules/m09_olympiad_problem.py", note: "OPIE 竞赛题解码（检索/生成/改编/解析）规划中" },
+  m10: { status: "stub", file: "backend/app/modules/m10_olympiad_coaching.py", note: "AOCS 单题多轮自适应教练规划中" },
+  m11: { status: "stub", file: "backend/app/modules/m11_scientific_inquiry.py", note: "SIEE 实验设计/误差分析/数据处理规划中" },
+  m12: { status: "stub", file: "backend/app/modules/m12_learning_orchestration.py", note: "ALOE 排程与学习路径规划中" },
+  m13: { status: "live", file: "backend/app/memory.py", note: "CMOS 六层记忆已实装，按 student_id 多租户分片读写巩固" },
+  m14: { status: "live", file: "backend/app/modules/assessment_engine.py", note: "HPCAS 由 orchestrator._assess 调用 assessment_engine（heuristic/llm 双路径）产出 PQ/雷达/就绪度；m14_competency_assessment.py 仅占位" },
+  m15: { status: "stub", file: "backend/app/modules/m15_multimodal.py", note: "UMLIE 题目图片/手绘/公式 OCR 规划中" },
+  m16: { status: "live", file: "backend/app/orchestrator.py", note: "真正的 LangGraph 编排在 orchestrator.py（classify→dispatch→assemble→assess，含退化链）；m16_runtime_orchestrator.py 为静态占位" },
 };
 
 // ---------- 测评总览 ----------

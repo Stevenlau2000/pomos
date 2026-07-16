@@ -4,7 +4,7 @@
 
 import * as React from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { LAYER_META, MODULES, MODULE_STATUS, type PomosLayer, type PomosModule } from "@/lib/pomosData";
+import { LAYER_META, MODULES, MODULE_STATUS, MODULE_DETAIL, type PomosLayer, type PomosModule } from "@/lib/pomosData";
 import { useI18n } from "@/lib/i18n";
 
 const ORDER: PomosLayer[] = [
@@ -23,6 +23,11 @@ const ModulesView: React.FC = () => {
   const q = query.trim().toLowerCase();
   const match = (m: PomosModule) =>
     !q || m.name.toLowerCase().includes(q) || m.desc.toLowerCase().includes(q);
+
+  const MODULE_BY_ID = React.useMemo(
+    () => Object.fromEntries(MODULES.map((m) => [m.id, m])),
+    [],
+  );
 
   const liveCount = MODULES.filter((m) => MODULE_STATUS[m.id]?.status === "live").length;
 
@@ -95,6 +100,36 @@ const ModulesView: React.FC = () => {
                     <span className="text-muted-foreground">说明：</span>
                     {info.note}
                   </div>
+                  {(() => {
+                    const detail = MODULE_DETAIL[selected.id];
+                    if (!detail) return null;
+                    return (
+                      <>
+                        <div>
+                          <span className="text-muted-foreground">核心职责详述：</span>
+                          {detail.role}
+                        </div>
+                        <div>
+                          <span className="text-muted-foreground">关键算法 / 框架：</span>
+                          <ul className="ml-4 list-disc space-y-0.5">
+                            {detail.methods.map((method, i) => (
+                              <li key={i}>{method}</li>
+                            ))}
+                          </ul>
+                        </div>
+                        <div>
+                          <span className="text-muted-foreground">输入 → 输出：</span>
+                          {detail.io}
+                        </div>
+                        <div>
+                          <span className="text-muted-foreground">依赖模块：</span>
+                          {detail.deps
+                            .map((id) => (MODULE_BY_ID[id] ? `${id} ${MODULE_BY_ID[id].name}` : id))
+                            .join("、")}
+                        </div>
+                      </>
+                    );
+                  })()}
                 </>
               );
             })()}
