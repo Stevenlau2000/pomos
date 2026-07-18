@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import Progress from "@/components/ui/progress";
 import { NINE_DIMS } from "@/lib/pomosData";
-import { getDashboard, type Dashboard } from "@/lib/api";
+import { useDashboard } from "@/lib/useDashboard";
 import { useI18n } from "@/lib/i18n";
 
 function colorFor(v: number): string {
@@ -29,17 +29,8 @@ interface DimView {
 
 const TwinView: React.FC<TwinViewProps> = ({ studentId, refreshKey }) => {
   const { t } = useI18n();
-  const [dash, setDash] = React.useState<Dashboard | null>(null);
-
-  React.useEffect(() => {
-    let alive = true;
-    getDashboard(studentId)
-      .then((d) => alive && setDash(d))
-      .catch(() => alive && setDash(null));
-    return () => {
-      alive = false;
-    };
-  }, [studentId, refreshKey]);
+  // 仪表盘数据统一由 useDashboard hook 拉取（取代原先重复的 useEffect 样板）
+  const { dash } = useDashboard(studentId, refreshKey);
 
   const dims: DimView[] = dash
     ? dash.twin.map((d) => ({

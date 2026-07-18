@@ -13,6 +13,18 @@ import {
   type ProblemTemplate,
   type BugCategory,
 } from "./physicsKB";
+import type { PcdfLayer } from "./pomosData";
+
+// FNV-1a 32-bit 哈希：把任意字符串映射为无符号整数。
+// 用于把「板块:难度」等输入稳定地派生为确定性种子（避免 Date.now() 引入的非确定性）。
+function hashStr(s: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
 
 // ---------- 类型
 export interface GeneratedQuestion {
@@ -76,7 +88,8 @@ function clamp(v: number, lo = 0, hi = 1): number {
   return Math.max(lo, Math.min(hi, v));
 }
 
-type TwinLike = { key: string; value: number; label?: string }[];
+// QA 单测（test/offlineGen.test.ts）需要直接构造九维孪生，故显式导出该类型。
+export type TwinLike = { key: string; value: number; label?: string }[];
 
 function twinMap(twin: TwinLike): Record<string, number> {
   const m: Record<string, number> = {};
@@ -130,14 +143,8 @@ export function computeBoardMastery(twin: TwinLike): Record<Board, number> {
 }
 
 // ---------------------------------------------------------------- PCDF 八层（由九维推导，替代写死常量）
-export interface PcdfLayerOut {
-  layer: number;
-  name: string;
-  status: "ok" | "warn" | "risk";
-  score: number;
-  note: string;
-}
-export function derivePcdfLayers(twin: TwinLike): PcdfLayerOut[] {
+// 返回结构与 pomosData.ts 的 PcdfLayer 完全一致，故直接复用该类型（单源）。
+export function derivePcdfLayers(twin: TwinLike): PcdfLayer[] {
   const m = twinMap(twin);
   const at = (k: string) => Math.round((m[k] ?? 0) * 100);
   const defs: { layer: number; name: string; score: number; note: string }[] = [
@@ -175,7 +182,7 @@ function pickProblem(board: Board, difficulty: number): ProblemTemplate {
 export function generateCompetitionQuestion(
   board: Board,
   difficulty: number,
-  rngSeed = Date.now(),
+  rngSeed = hashStr(`${board}:${difficulty}`),
 ): GeneratedQuestion {
   const p = pickProblem(board, difficulty);
   const pool = PHYSICS_BANK[board].problems;
@@ -188,7 +195,7 @@ export function generateCompetitionQuestion(
     chosen = arr[idx];
   }
   return {
-    id: `gen_${Date.now()}_${Math.floor(rngSeed % 1000)}`,
+    id: `q-${board}-${difficulty}-${rngSeed}`,
     topic: chosen.topic,
     board,
     difficulty: chosen.difficulty,

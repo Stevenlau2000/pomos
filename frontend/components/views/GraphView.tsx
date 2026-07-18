@@ -9,9 +9,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import KnowledgeGraph from "@/components/dashboard/KnowledgeGraph";
 import type { KGNode } from "@/lib/pomosData";
-import { getDashboard, generateTrainingForNode, type Dashboard } from "@/lib/api";
+import { generateTrainingForNode } from "@/lib/api";
 import { masteryTier, type GeneratedTraining } from "@/lib/offlineGen";
 import type { Board } from "@/lib/physicsKB";
+import { useDashboard } from "@/lib/useDashboard";
 import { useI18n } from "@/lib/i18n";
 
 interface GraphViewProps {
@@ -28,19 +29,10 @@ const GraphView: React.FC<GraphViewProps> = ({
 }) => {
   const { t } = useI18n();
   const [selected, setSelected] = React.useState<KGNode | null>(null);
-  const [dash, setDash] = React.useState<Dashboard | null>(null);
+  // 仪表盘数据统一由 useDashboard hook 拉取（取代原先重复的 useEffect 样板）
+  const { dash } = useDashboard(studentId, refreshKey);
   const [generated, setGenerated] = React.useState<GeneratedTraining | null>(null);
   const [busy, setBusy] = React.useState(false);
-
-  React.useEffect(() => {
-    let alive = true;
-    getDashboard(studentId)
-      .then((d) => alive && setDash(d))
-      .catch(() => alive && setDash(null));
-    return () => {
-      alive = false;
-    };
-  }, [studentId, refreshKey]);
 
   const masteryOf = (n: KGNode) =>
     dash && dash.board_mastery[n.board] != null

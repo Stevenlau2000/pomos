@@ -17,9 +17,11 @@ import {
   SAMPLE_READINESS,
   PCDF_LAYERS,
   MISTAKES,
+  type PcdfLayer,
 } from "@/lib/pomosData";
-import { getDashboard, getMistakes, type Dashboard, type Mistake } from "@/lib/api";
-import { derivePcdfLayers, type PcdfLayerOut } from "@/lib/offlineGen";
+import { getMistakes, type Mistake } from "@/lib/api";
+import { derivePcdfLayers } from "@/lib/offlineGen";
+import { useDashboard } from "@/lib/useDashboard";
 import { useI18n } from "@/lib/i18n";
 
 function StatCard({
@@ -63,21 +65,19 @@ interface OverviewViewProps {
 
 const OverviewView: React.FC<OverviewViewProps> = ({ studentId, refreshKey }) => {
   const { t } = useI18n();
-  const [dash, setDash] = React.useState<Dashboard | null>(null);
+  // 仪表盘数据统一由 useDashboard hook 拉取（取代原先重复的 getDashboard + useState + useEffect 样板）
+  const { dash } = useDashboard(studentId, refreshKey);
   const [mistakes, setMistakes] = React.useState<Mistake[] | null>(null);
 
   React.useEffect(() => {
     let alive = true;
-    getDashboard(studentId)
-      .then((d) => alive && setDash(d))
-      .catch(() => alive && setDash(null));
     getMistakes(studentId)
       .then((m) => alive && setMistakes(m))
       .catch(() => alive && setMistakes(null));
     return () => {
       alive = false;
     };
-  }, [studentId, refreshKey]);
+  }, [studentId]);
 
   const pq = dash ? Math.round(dash.pq * 100) : SAMPLE_PQ;
   const radar = dash
@@ -95,7 +95,7 @@ const OverviewView: React.FC<OverviewViewProps> = ({ studentId, refreshKey }) =>
     : SAMPLE_GROWTH;
   const readiness = dash ? dash.readiness : SAMPLE_READINESS;
   // 诊断分层：有真实孪生时由九维推导，否则回退示例数据
-  const pcdf: PcdfLayerOut[] = dash ? derivePcdfLayers(dash.twin) : [];
+  const pcdf: PcdfLayer[] = dash ? derivePcdfLayers(dash.twin) : [];
 
   const lowest = [...PCDF_LAYERS].sort((a, b) => a.score - b.score)[0];
   // 最弱维度优先取实时数字孪生（动态数据），无数据时回退到静态 PCDF 参考层

@@ -33,7 +33,7 @@ const Mermaid: React.FC<MermaidProps> = ({ code }) => {
   const [error, setError] = React.useState<string | null>(null);
 
   React.useEffect(() => {
-    mermaid.initialize({ startOnLoad: false, theme: "default" });
+    mermaid.initialize({ startOnLoad: false, theme: "default", securityLevel: "strict" });
     let cancelled = false;
     const id = `mermaid-${Math.random().toString(36).slice(2)}`;
     mermaid

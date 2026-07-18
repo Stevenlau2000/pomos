@@ -53,7 +53,9 @@ export interface KGLink {
   relation: "prerequisite" | "transfer";
 }
 
-export const KG_BOARDS = ["力学", "电磁学", "热学", "光学", "近代物理"];
+// KG_BOARDS 正典定义在 physicsKB.ts（带 Board 字面量类型），此处仅 re-export 保持导出名不变，
+// 避免其他 import 改动；真正真相源统一为 physicsKB.ts。
+export { KG_BOARDS } from "./physicsKB";
 
 export const KG_NODES: KGNode[] = [
   { id: "mech", name: "力学", board: "力学", mastery: 76, difficulty: 3, importance: 5 },

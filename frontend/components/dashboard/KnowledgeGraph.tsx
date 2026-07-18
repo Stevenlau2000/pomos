@@ -29,7 +29,7 @@ const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({ onSelect, boardMastery 
     return {
       id: n.id,
       name: n.name,
-      category: KG_BOARDS.indexOf(n.board),
+      category: KG_BOARDS.findIndex((b) => b === n.board),
       symbolSize: 18 + n.importance * 4,
       value: mastery,
       itemStyle: {
@@ -46,7 +46,7 @@ const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({ onSelect, boardMastery 
         return `${param.data?.name ?? ""} · 掌握度 ${param.data?.value ?? "?"}`;
       },
     },
-    legend: { data: KG_BOARDS, top: 4, textStyle: { fontSize: 11 } },
+    legend: { data: [...KG_BOARDS], top: 4, textStyle: { fontSize: 11 } },
     series: [
       {
         type: "graph",

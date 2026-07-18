@@ -43,6 +43,9 @@ import {
   type BugCategory,
 } from "./physicsKB";
 
+// 九维正典定义统一从 pomosData.ts 引入（与后端对齐、UI 文案源），避免离线副本 label 不一致。
+import { NINE_DIMS } from "./pomosData";
+
 // ---------------------------------------------------------------- 存储工具
 const KEYS = {
   students: "pomos_offline_students",
@@ -443,32 +446,27 @@ function getSettingsStore(): SettingsResponse {
 }
 
 // ---------------------------------------------------------------- 确定性 mock 数据
-const NINE_DIMS: { key: string; label: string; hint: string }[] = [
-  { key: "concept", label: "概念理解", hint: "对物理概念与本质的掌握程度" },
-  { key: "modeling", label: "建模能力", hint: "把现实问题翻译为物理模型" },
-  { key: "reasoning", label: "推理能力", hint: "因果演绎与逻辑链完整性" },
-  { key: "calculation", label: "计算能力", hint: "数学求解与数值处理规范" },
-  { key: "experiment", label: "实验探究", hint: "误差、图像与数据处理" },
-  { key: "transfer", label: "迁移能力", hint: "跨情境类比与综合应用" },
-  { key: "meta", label: "元认知", hint: "自我监控与错题反思" },
-  { key: "competition", label: "竞赛素养", hint: "竞赛策略与压轴题经验" },
-  { key: "growth", label: "成长态势", hint: "持续训练与提升趋势" },
-];
 
 // ---------------------------------------------------------------- PQ 单源推导（技术债 ⑤）
 // 所有生成 PQ 的入口统一经 pqFromTwin，确保顶栏 PQ 与 getDashboard 重算值同源、无随机抖动。
-function twinToMap(twin: Array<{ key: string; value: number }>): Record<string, number> {
+// 技术债 ⑤ 收尾（QA 建议）：显式导出，便于单测直接构造 Record<string,number> 验证映射。
+export function twinToMap(twin: Array<{ key: string; value: number }>): Record<string, number> {
   const m: Record<string, number> = {};
   for (const dim of twin) m[dim.key] = dim.value;
   return m;
 }
 
-function pqFromTwin(twin: Record<string, number>): number {
-  const vals = NINE_DIMS.map((d) => twin[d.key] ?? 0);
+// 技术债 ⑤ 收尾（QA 建议）：显式导出，便于单元测试直接覆盖边界（空 twin / NaN twin 不抛异常）。
+// 数值健壮性加固：对每维显式 Number() 并归零 NaN（空对象 / 含 NaN 会污染均值，必须归零）。
+export function pqFromTwin(twin: Record<string, number>): number {
+  const vals: number[] = [];
+  for (const d of NINE_DIMS) {
+    const v = Number(twin[d.key] ?? 0);
+    vals.push(Number.isNaN(v) ? 0 : v);
+  }
   const mean = vals.reduce((a, b) => a + b, 0) / (vals.length || 1);
   return clamp(0.2 + 0.8 * mean, 0, 0.99);
 }
-const BOARDS = ["力学", "电磁学", "热学", "光学", "近代物理"];
 const WEAK_POOL = [
   "转动参考系下的惯性力处理",
   "非静电力做功的符号约定",
@@ -501,7 +499,8 @@ interface MockData {
 const mockCache = new Map<string, MockData>();
 
 /** 由九维孪生推导完整的仪表盘数据（就绪度 / 板块掌握度 / 雷达均自洽）。 */
-function buildMockFromTwin(id: string, twin: NineDim[]): MockData {
+// 技术债 ⑤ 收尾（QA 建议）：显式导出，便于单测直接构造 NineDim[] 验证推导自洽性。
+export function buildMockFromTwin(id: string, twin: NineDim[]): MockData {
   const tq = (k: string) => twin.find((d) => d.key === k)?.value ?? 0.5;
   const pq = pqFromTwin(twinToMap(twin));
   const radar: PqRadar = {

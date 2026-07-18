@@ -6,16 +6,13 @@ import * as React from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import Progress from "@/components/ui/progress";
-import { PCDF_LAYERS, COGNITIVE_BUGS, type DiagStatus } from "@/lib/pomosData";
-import { getDashboard, createMistake, type Dashboard } from "@/lib/api";
+import { PCDF_LAYERS, COGNITIVE_BUGS } from "@/lib/pomosData";
+import { createMistake } from "@/lib/api";
 import { inferBugCategory } from "@/lib/physicsKB";
+import { derivePcdfLayers } from "@/lib/offlineGen";
+import { useDashboard } from "@/lib/useDashboard";
+import { diagStatusMeta } from "@/lib/diag";
 import { useI18n } from "@/lib/i18n";
-
-function statusMeta(s: DiagStatus): { color: string; label: string } {
-  if (s === "ok") return { color: "#10b981", label: "健康" };
-  if (s === "warn") return { color: "#f59e0b", label: "预警" };
-  return { color: "#ef4444", label: "风险" };
-}
 
 interface DiagnosisViewProps {
   studentId: string;
@@ -29,19 +26,10 @@ const DiagnosisView: React.FC<DiagnosisViewProps> = ({
   onMistakeAdded,
 }) => {
   const { t } = useI18n();
-  const [dash, setDash] = React.useState<Dashboard | null>(null);
+  // 仪表盘数据统一由 useDashboard hook 拉取；诊断分层动态由九维孪生推导，无数据时回退静态示例。
+  const { dash } = useDashboard(studentId, refreshKey);
   const [added, setAdded] = React.useState<Record<string, boolean>>({});
   const [busy, setBusy] = React.useState<string | null>(null);
-
-  React.useEffect(() => {
-    let alive = true;
-    getDashboard(studentId)
-      .then((d) => alive && setDash(d))
-      .catch(() => alive && setDash(null));
-    return () => {
-      alive = false;
-    };
-  }, [studentId, refreshKey]);
 
   const weak = dash?.weak_concepts ?? [];
 
@@ -101,11 +89,11 @@ const DiagnosisView: React.FC<DiagnosisViewProps> = ({
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-sm">分层健康度（示例数据）</CardTitle>
+          <CardTitle className="text-sm">分层健康度{ dash ? "（来自数字孪生）" : "（示例数据）" }</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
-          {PCDF_LAYERS.map((l) => {
-            const m = statusMeta(l.status);
+          {(dash ? derivePcdfLayers(dash.twin) : PCDF_LAYERS).map((l) => {
+            const m = diagStatusMeta(l.status);
             return (
               <div key={l.layer} className="space-y-1">
                 <div className="flex items-center justify-between">
