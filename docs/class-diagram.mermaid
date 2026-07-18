@@ -1,0 +1,35 @@
+classDiagram
+    class ModuleBase {
+        <<abstract>>
+        +name: str
+        +layer: str
+        +spec: str
+        +run(ctx: dict) dict*
+    }
+    class TeachingStrategyModule {
+        +run(ctx: dict) dict
+        -_infer_goal(ctx) dict
+    }
+    class OlympiadCoachingModule {
+        +run(ctx: dict) dict
+        -_restore_state(ctx) dict
+    }
+    ModuleBase <|-- TeachingStrategyModule
+    ModuleBase <|-- OlympiadCoachingModule
+
+    class M08Helpers {
+        <<module-level pure fns>>
+        +route_mode(signals) str
+        +initial_hint_level(twin, diagnosis, problem_meta) int
+        +generate_hint(level, problem_meta, lang) str
+        +select_strategy(twin, diagnosis, goal, lang) dict
+    }
+    class M10Helpers {
+        <<module-level pure fns>>
+        +evaluate_answer(student_answer, reference, lang) str
+        +aocs_transition(prev_state, evaluation, lang) dict
+        +build_feedback(state, strategy, lang) str
+    }
+    M08Helpers <.. TeachingStrategyModule : used by run
+    M08Helpers <.. OlympiadCoachingModule : imported (m10 to m08 dependency)
+    M10Helpers <.. OlympiadCoachingModule : used by run

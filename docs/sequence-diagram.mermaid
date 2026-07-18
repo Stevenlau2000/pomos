@@ -1,0 +1,30 @@
+sequenceDiagram
+    autonumber
+    participant U as 学生(前端)
+    participant API as chat.py /api/chat
+    participant ORC as orchestrator._dispatch
+    participant M04 as Student.twin (DB)
+    participant M05 as detect_misconceptions
+    participant M08 as TeachingStrategyModule
+    participant M10 as OlympiadCoachingModule
+
+    U->>API: POST /api/chat {message:"教练帮我做这道电磁感应题"}
+    API->>M04: db.get(Student) → twin (chat.py:43-48)
+    API->>ORC: run_orchestrator(student_id, message, twin)
+    ORC->>ORC: _classify → intent="coaching" (关键词 教练/辅导, orchestrator.py:46-77)
+    ORC->>ORC: _dispatch 构造 ctx（改动点1：注入 twin, orchestrator.py:127-133）
+    Note over ORC: 改动点2：intent=="coaching" 走 m08→m10 管道
+    ORC->>M08: m08.run(ctx)
+    M08->>M05: detect_misconceptions(message, lang)
+    M08->>M08: select_strategy(twin, diagnosis, goal, lang)
+    M08-->>ORC: {mode, hint_level, rationale, target_dims}
+    ORC->>ORC: ctx.student_ctx["teaching_strategy"] = M08 输出
+    ORC->>M10: m10.run(ctx)  # 携带 teaching_strategy
+    M10->>M08: select_strategy(...) 若 student_ctx 无则回退调用（m10→m08 依赖）
+    M10->>M10: evaluate_answer(student_answer, reference)
+    M10->>M10: aocs_transition(prev_state, evaluation)
+    M10->>M08: generate_hint(hint_level, problem_meta)  # action==给提示 时
+    M10-->>ORC: {turn, feedback, hint_level, action, next_step, aocs_status}
+    ORC-->>API: last_result = m10 输出 (module_trace 含 m08+m10)
+    API->>API: apply_student_update(评估闭环) + 落库 (chat.py:73)
+    API-->>U: {reply, module_trace, student_update}

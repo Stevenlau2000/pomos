@@ -131,17 +131,41 @@ def _dispatch(state: State) -> State:
         "memory": get_memory(state["student_id"]).snapshot(),
         "student_ctx": student_ctx,
     }
+    # 改动点 1：把九维画像注入 ctx，使 m08/m10（及同走此 ctx 的 m04）能读到 twin
+    ctx["twin"] = state.get("twin") or {}
+    student_ctx.setdefault("twin", state.get("twin") or {})
 
     primary = get_module(module_id)
     result: Optional[Dict[str, Any]] = None
     if primary is not None:
-        result = primary.run(ctx)
-        trace.append({
-            "module": result.get("module", module_id),
-            "action": result.get("action", ""),
-            "ts": int(time.time()),
-        })
-        if isinstance(result.get("output"), dict):
+        if intent == "coaching":
+            # 改动点 2：coaching 走 m08 → m10 管道，保证 m10 拿到与 m08 同源策略
+            m08 = get_module("m08_teaching_strategy")
+            if m08 is not None:
+                m08_res = m08.run(ctx)
+                if isinstance(m08_res, dict) and isinstance(m08_res.get("output"), dict):
+                    student_ctx["teaching_strategy"] = m08_res["output"]
+                    trace.append({
+                        "module": m08_res.get("module", "m08_teaching_strategy"),
+                        "action": m08_res.get("action", ""),
+                        "ts": int(time.time()),
+                    })
+            m10 = get_module("m10_olympiad_coaching")
+            result = m10.run(ctx) if m10 is not None else None
+            if isinstance(result, dict):
+                trace.append({
+                    "module": result.get("module", "m10_olympiad_coaching"),
+                    "action": result.get("action", ""),
+                    "ts": int(time.time()),
+                })
+        else:
+            result = primary.run(ctx)
+            trace.append({
+                "module": result.get("module", module_id),
+                "action": result.get("action", ""),
+                "ts": int(time.time()),
+            })
+        if isinstance(result, dict) and isinstance(result.get("output"), dict):
             student_ctx.update(result["output"])
 
     # 系统大脑参与协调
