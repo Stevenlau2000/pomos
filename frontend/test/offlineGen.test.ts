@@ -106,8 +106,24 @@ describe("generateCompetitionQuestion", () => {
   it("传入显式 seed 时两次调用结果完全一致（确定性）", () => {
     const q1 = generateCompetitionQuestion("力学", 3, 12345);
     const q2 = generateCompetitionQuestion("力学", 3, 12345);
-    // 注意：返回对象的 id 字段内含 Date.now()，不参与确定性断言；
-    // 确定性校验针对题目内容字段（topic/board/difficulty/stem 等）。
+    // M1 后 id = `q-${board}-${difficulty}-${rngSeed}`，不含 Date.now()；
+    // 显式 seed 固定时 id 与内容字段均确定性一致。
+    expect(q1.id).toBe(q2.id);
+    expect(q1.topic).toBe(q2.topic);
+    expect(q1.board).toBe(q2.board);
+    expect(q1.difficulty).toBe(q2.difficulty);
+    expect(q1.stem).toBe(q2.stem);
+    expect(q1.hint).toBe(q2.hint);
+    expect(q1.solutionPoints).toEqual(q2.solutionPoints);
+    expect(q1.keyPoints).toEqual(q2.keyPoints);
+  });
+
+  it("不传 seed 时（默认由 board:difficulty 哈希派生）两次调用内容字段与 id 完全一致", () => {
+    const q1 = generateCompetitionQuestion("力学", 3);
+    const q2 = generateCompetitionQuestion("力学", 3);
+    // M1：默认 rngSeed = hashStr(`${board}:${difficulty}`)，不含 Date.now()；
+    // 因此同 (board,difficulty) 两次调用结果一致，且 id 一致（确定性证明）。
+    expect(q1.id).toBe(q2.id);
     expect(q1.topic).toBe(q2.topic);
     expect(q1.board).toBe(q2.board);
     expect(q1.difficulty).toBe(q2.difficulty);
