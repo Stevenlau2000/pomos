@@ -35,9 +35,9 @@ const ReadinessGauge: React.FC<ReadinessGaugeProps> = ({ data }) => {
           lineStyle: {
             width: 12,
             color: [
-              [d.province_top, "#10b981"],
-              [d.province_team, "#f59e0b"],
               [d.ipho, "#ef4444"],
+              [d.province_team, "#f59e0b"],
+              [d.province_top, "#10b981"],
               [1, "#e5e7eb"],
             ],
           },

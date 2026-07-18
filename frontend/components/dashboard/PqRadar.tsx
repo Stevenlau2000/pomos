@@ -31,7 +31,9 @@ const INDICATORS = [
 ] as const;
 
 const PqRadar: React.FC<PqRadarProps> = ({ data }) => {
-  const d = data ?? EXAMPLE;
+  // 全 0（新学生未初始化）时回退示例，避免雷达塌缩到圆心
+  const allZero = data ? INDICATORS.every((it) => !(data[it.key] > 0)) : false;
+  const d = data && !allZero ? data : EXAMPLE;
   const option: EChartsOption = {
     tooltip: {},
     radar: {

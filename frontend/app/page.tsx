@@ -94,6 +94,8 @@ function WorkspaceInner() {
   const [student, setStudent] = React.useState<{ name: string; grade: string }>(
     () => loadStudent(),
   );
+  // 导师模式：通用 / 竞赛
+  const [mentorMode, setMentorMode] = React.useState<"general" | "competition">("general");
   // SSE 流式连接的生命周期控制：切视图或重入时中止上一个请求
   const abortRef = React.useRef<AbortController | null>(null);
 
@@ -296,6 +298,8 @@ function WorkspaceInner() {
             loading={loading}
             onSend={handleSend}
             onAbort={() => abortRef.current?.abort()}
+            mentorMode={mentorMode}
+            onMentorModeChange={setMentorMode}
           />
         );
       case "overview":
@@ -319,7 +323,17 @@ function WorkspaceInner() {
           />
         );
       case "training":
-        return <TrainingView studentId={studentId} refreshKey={refreshKey} />;
+        return (
+          <TrainingView
+            studentId={studentId}
+            refreshKey={refreshKey}
+            onProgress={() => setRefreshKey((k) => k + 1)}
+            onMentorPrompt={(text) => {
+              setView("chat");
+              handleSend(text);
+            }}
+          />
+        );
       case "mistakes":
         return <MistakesView studentId={studentId} refreshKey={refreshKey} />;
       case "modules":

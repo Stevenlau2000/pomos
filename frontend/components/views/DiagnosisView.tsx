@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import Progress from "@/components/ui/progress";
 import { PCDF_LAYERS, COGNITIVE_BUGS, type DiagStatus } from "@/lib/pomosData";
 import { getDashboard, createMistake, type Dashboard } from "@/lib/api";
+import { inferBugCategory } from "@/lib/physicsKB";
 import { useI18n } from "@/lib/i18n";
 
 function statusMeta(s: DiagStatus): { color: string; label: string } {
@@ -51,7 +52,7 @@ const DiagnosisView: React.FC<DiagnosisViewProps> = ({
       await createMistake(studentId, {
         topic: "误区复盘",
         summary: note,
-        bug_id: "detected",
+        bug_id: inferBugCategory(note).id,
       });
       setAdded((p) => ({ ...p, [note]: true }));
       onMistakeAdded?.();

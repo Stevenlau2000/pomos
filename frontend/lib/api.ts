@@ -7,6 +7,8 @@
 // 由 detectApiMode() 在应用启动时探测 /api/health 决定 MODE。
 
 import * as offline from "./offlineApi";
+import type { GeneratedQuestion, GeneratedTraining, MistakeAnalysis } from "./offlineGen";
+import type { Board, BugCategory } from "./physicsKB";
 
 export const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000";
 
@@ -397,6 +399,41 @@ export function getTraining(studentId: string): Promise<TrainingPlan> {
   return request<TrainingPlan>(`/api/students/${encodeURIComponent(studentId)}/training`);
 }
 
+// ---------- 浏览器内生成引擎（离线 / 无后端时由前端真实生成） ----------
+export function getBugCategories(): BugCategory[] {
+  return offline.getBugCategories();
+}
+export function generateCompetitionQuestion(board: Board, difficulty: number): GeneratedQuestion {
+  return offline.generateCompetitionQuestion(board, difficulty);
+}
+export function generateTrainingForNode(
+  nodeName: string,
+  board: Board,
+  mastery: number,
+): GeneratedTraining {
+  return offline.generateTrainingForNode(nodeName, board, mastery);
+}
+export function generateMistakeAnalysis(
+  topic: string,
+  summary: string,
+  categoryId?: string,
+): MistakeAnalysis {
+  return offline.generateMistakeAnalysis(topic, summary, categoryId);
+}
+export function applyMasteryDelta(
+  studentId: string,
+  delta: Record<string, number>,
+): Promise<StudentUpdate> {
+  // 后端暂未实现该端点；离线生成引擎直接回写九维孪生
+  return Promise.resolve(offline.applyMasteryDelta(studentId, delta));
+}
+export function getTwin(studentId: string): Promise<NineDim[]> {
+  return Promise.resolve(offline.getTwin(studentId));
+}
+export function masteryDeltaForBoard(board: Board): Record<string, number> {
+  return offline.masteryDeltaForBoard(board);
+}
+
 /** 获取错题本 */
 export function getMistakes(studentId: string): Promise<Mistake[]> {
   if (offlineMode()) return offline.getMistakes(studentId);
@@ -416,7 +453,7 @@ export function createMistake(studentId: string, data: MistakeCreate): Promise<M
 export function updateMistake(
   studentId: string,
   id: string,
-  data: { status?: string; summary?: string; analysis?: string },
+  data: { status?: string; summary?: string; analysis?: string; bug_id?: string },
 ): Promise<Mistake> {
   if (offlineMode()) return offline.updateMistake(studentId, id, data);
   return request<Mistake>(

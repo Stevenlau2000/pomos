@@ -14,9 +14,19 @@ interface ChatViewProps {
   onSend: (text: string) => void;
   /** 可选：视图卸载时中止正在进行的 SSE 流式连接。 */
   onAbort?: () => void;
+  /** 导师模式：通用 / 竞赛 */
+  mentorMode?: "general" | "competition";
+  onMentorModeChange?: (m: "general" | "competition") => void;
 }
 
-const ChatView: React.FC<ChatViewProps> = ({ messages, loading, onSend, onAbort }) => {
+const ChatView: React.FC<ChatViewProps> = ({
+  messages,
+  loading,
+  onSend,
+  onAbort,
+  mentorMode = "general",
+  onMentorModeChange,
+}) => {
   const { t } = useI18n();
   // 卸载时中止 SSE 流式连接，避免切视图后后台仍消耗带宽
   React.useEffect(() => {
@@ -33,9 +43,39 @@ const ChatView: React.FC<ChatViewProps> = ({ messages, loading, onSend, onAbort 
   return (
     <div className="flex h-full flex-col">
       <div className="border-b border-border px-6 py-3">
-        <h2 className="text-sm font-semibold">{t("views.chat.title")}</h2>
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm font-semibold">{t("views.chat.title")}</h2>
+          {onMentorModeChange && (
+            <div className="flex rounded-md border border-border p-0.5 text-[11px]">
+              <button
+                onClick={() => onMentorModeChange("general")}
+                className={
+                  "rounded px-2 py-1 " +
+                  (mentorMode === "general"
+                    ? "bg-brand text-brand-foreground"
+                    : "text-muted-foreground hover:text-brand")
+                }
+              >
+                通用导师
+              </button>
+              <button
+                onClick={() => onMentorModeChange("competition")}
+                className={
+                  "rounded px-2 py-1 " +
+                  (mentorMode === "competition"
+                    ? "bg-brand text-brand-foreground"
+                    : "text-muted-foreground hover:text-brand")
+                }
+              >
+                竞赛导师
+              </button>
+            </div>
+          )}
+        </div>
         <p className="text-[11px] text-muted-foreground">
-          {t("views.chat.sub")}
+          {mentorMode === "competition"
+            ? "竞赛导师模式：可让我「生成题目 / 生成针对性训练」，直接产出竞赛题与解析"
+            : t("views.chat.sub")}
         </p>
       </div>
       <div className="flex flex-1 flex-col overflow-hidden">

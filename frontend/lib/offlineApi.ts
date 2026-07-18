@@ -33,6 +33,16 @@ import type {
   StreamHandlers,
 } from "./api";
 
+// 浏览器内生成引擎（真实题目 / 训练 / 解析 / 就绪度推导）
+import * as Gen from "./offlineGen";
+import {
+  BUG_CATEGORIES,
+  KG_BOARDS,
+  findBoardByKeyword,
+  type Board,
+  type BugCategory,
+} from "./physicsKB";
+
 // ---------------------------------------------------------------- 存储工具
 const KEYS = {
   students: "pomos_offline_students",
@@ -92,6 +102,62 @@ function sample<T>(arr: T[], n: number, rng: () => number): T[] {
   return out;
 }
 
+// ---------------------------------------------------------------- 按学生持久化的数字孪生 / 训练状态
+const KEYS_TWIN = (id: string) => `pomos_offline_twin_${id}`;
+const KEYS_TRAIN = (id: string) => `pomos_offline_training_${id}`;
+const KEYS_DAILY = (id: string) => `pomos_offline_dailyplan_${id}`;
+
+/** 新建学生的九维基线：处于竞赛备考起步阶段，非全 0、非随机噪声。 */
+function baselineTwin(id: string, name: string): NineDim[] {
+  const base: Record<string, number> = {
+    concept: 0.55,
+    modeling: 0.5,
+    reasoning: 0.55,
+    calculation: 0.6,
+    experiment: 0.5,
+    transfer: 0.4,
+    meta: 0.5,
+    competition: 0.35,
+    growth: 0.5,
+  };
+  const rng = makeRng(hashStr(`${name || id}`));
+  return NINE_DIMS.map((d) => ({
+    key: d.key,
+    label: d.label,
+    value: Number(clamp(base[d.key] + (rng() - 0.5) * 0.12, 0.2, 0.92).toFixed(3)),
+    hint: d.hint,
+  }));
+}
+
+function getStoredTwin(id: string): NineDim[] | null {
+  const raw = lsGet(KEYS_TWIN(id));
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as NineDim[];
+  } catch {
+    return null;
+  }
+}
+function setStoredTwin(id: string, twin: NineDim[]): void {
+  lsSet(KEYS_TWIN(id), JSON.stringify(twin));
+}
+
+/** 完成某板块训练后回写的能力增量（九维 key → 增量 0~1） */
+export function masteryDeltaForBoard(board: Board): Record<string, number> {
+  const map: Record<Board, string[]> = {
+    力学: ["modeling", "reasoning", "calculation", "concept"],
+    电磁学: ["modeling", "calculation", "reasoning", "transfer"],
+    热学: ["concept", "calculation", "reasoning"],
+    光学: ["concept", "modeling", "reasoning"],
+    近代物理: ["concept", "reasoning", "calculation", "competition"],
+  };
+  const out: Record<string, number> = {};
+  for (const k of map[board]) out[k] = 0.03;
+  out.competition = (out.competition ?? 0) + 0.02;
+  out.growth = 0.03;
+  return out;
+}
+
 // ---------------------------------------------------------------- 物理知识库（移植自后端）
 interface Topic {
   keys: string[];
@@ -143,6 +209,97 @@ function offlineTutor(message: string, lang: string): string {
     "电磁感应、相对论、热力学、量子基础、静电场、流体。\n" +
     "把题目或想弄清的概念告诉我，我会先帮你建立物理图像，再上公式。"
   );
+}
+
+// ---------------------------------------------------------------- 导师生成意图识别
+function extractBoard(text: string): Board | null {
+  const mb = text.match(/（([^）]+?)\s*板块）/) || text.match(/\(([^)]+?)\s*板块\)/);
+  if (mb && (KG_BOARDS as readonly string[]).includes(mb[1].trim())) return mb[1].trim() as Board;
+  return findBoardByKeyword(text);
+}
+
+function inferDifficulty(text: string): number {
+  if (/压轴|决赛|ipho|国家|高难|很难|复赛/.test(text)) return 5;
+  if (/省赛|进阶|综合|较难/.test(text)) return 4;
+  if (/入门|基础|简单|初赛|热身/.test(text)) return 2;
+  return 3;
+}
+
+function fmtQuestion(q: Gen.GeneratedQuestion): string {
+  return [
+    "【POMOS 竞赛导师 · 生成题目】",
+    `**${q.topic}**（${q.board} · 难度 ${"★".repeat(q.difficulty)}）`,
+    "",
+    q.stem,
+    "",
+    `> 💡 提示：${q.hint}`,
+  ].join("\n");
+}
+
+function fmtTraining(t: Gen.GeneratedTraining): string {
+  const lines: string[] = [];
+  lines.push("【POMOS 竞赛导师 · 针对性训练】");
+  lines.push(`针对「${t.node}」（${t.board} · 掌握度 ${Math.round(t.mastery)}/100 · 层级「${t.tier}」）`);
+  lines.push("");
+  lines.push("🎯 训练目标");
+  t.objectives.forEach((o) => lines.push(`• ${o}`));
+  lines.push("");
+  lines.push("📚 梯度题（由浅入深）");
+  t.problems.forEach((p, i) => {
+    lines.push(`**第 ${i + 1} 题 · ${p.topic}（难度 ${"★".repeat(p.difficulty)}）**`);
+    lines.push(p.stem);
+    lines.push(`> 提示：${p.hint}`);
+  });
+  lines.push("");
+  lines.push("⚠️ 常见误区");
+  t.misconceptions.forEach((c) => lines.push(`• ${c}`));
+  lines.push("");
+  lines.push(t.summary);
+  return lines.join("\n");
+}
+
+/** 若消息是生成意图（讲解已生成题 / 出题 / 训练计划），返回导师生成内容；否则返回 null 走常规辅导。 */
+function mentorGenerate(message: string, studentId: string): string | null {
+  const text = message || "";
+  // 讲解已生成的题目（页面会把题干与参考答案要点一并带来）
+  if (/讲解这道题/.test(text) && /参考答案要点/.test(text)) {
+    const stemStart = text.indexOf("讲解这道题：") + "讲解这道题：".length;
+    const idx = text.indexOf("【参考答案要点】");
+    const stem = text.slice(stemStart, idx).trim();
+    const points = text
+      .slice(idx + "【参考答案要点】".length)
+      .split("\n")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    return [
+      "【POMOS 竞赛导师 · 题目讲解】",
+      stem,
+      "",
+      "📐 求解思路：",
+      ...points.map((p, i) => `${i + 1}. ${p}`),
+      "",
+      "建议你先独立写出完整过程再对照要点自检；卡住时告诉我具体哪一步。",
+    ].join("\n");
+  }
+  const isTrain = /训练计划|针对性训练|生成训练|训练方案|训练建议/.test(text);
+  const isQuestion = /出题|生成题目|给我一道|来道题|练一道|一道题|考题|押一道/.test(text);
+  if (!isTrain && !isQuestion) return null;
+
+  const board = extractBoard(text);
+  const nodeMatch = text.match(/「([^」]+)」/);
+  const node = nodeMatch ? nodeMatch[1] : board ? `${board}核心` : "核心考点";
+
+  if (isTrain) {
+    const bm = Gen.computeBoardMastery(getTwin(studentId));
+    const mastery = board ? (bm[board] ?? 60) : 60;
+    const t = Gen.generateTrainingForNode(node, board ?? "力学", mastery);
+    return fmtTraining(t);
+  }
+  // 出题
+  const b = board ?? "力学";
+  const diff = inferDifficulty(text);
+  const q = Gen.generateCompetitionQuestion(b, diff);
+  return fmtQuestion(q);
 }
 
 function chunkText(text: string, size = 6): string[] {
@@ -324,20 +481,20 @@ interface MockData {
 }
 const mockCache = new Map<string, MockData>();
 
-function mockDashboard(id: string): MockData {
-  const cached = mockCache.get(id);
-  if (cached) return cached;
-  const rng = makeRng(hashStr(id || "guest"));
-  const pq = 0.42 + rng() * 0.45;
-  const dim = () => Number((0.3 + rng() * 0.65).toFixed(3));
+/** 由九维孪生推导完整的仪表盘数据（就绪度 / 板块掌握度 / 雷达均自洽）。 */
+function buildMockFromTwin(id: string, twin: NineDim[]): MockData {
+  const tq = (k: string) => twin.find((d) => d.key === k)?.value ?? 0.5;
+  const mean = twin.reduce((s, d) => s + d.value, 0) / twin.length;
+  const pq = Number(clamp(0.2 + 0.8 * mean, 0, 0.99).toFixed(3));
   const radar: PqRadar = {
-    knowledge: dim(),
-    modeling: dim(),
-    scientific_thinking: dim(),
-    transfer: dim(),
-    competition: dim(),
-    growth: dim(),
+    knowledge: tq("concept"),
+    modeling: tq("modeling"),
+    scientific_thinking: tq("reasoning"),
+    transfer: tq("transfer"),
+    competition: tq("competition"),
+    growth: tq("growth"),
   };
+  const rng = makeRng(hashStr(id || "guest") + 3);
   const growth_curve: GrowthPoint[] = [];
   let p = pq * 0.7;
   const now = Date.now();
@@ -348,29 +505,40 @@ function mockDashboard(id: string): MockData {
       pq: Number(p.toFixed(3)),
     });
   }
-  const readiness: Readiness = {
-    province_top: Number((0.4 + rng() * 0.5).toFixed(3)),
-    province_team: Number((0.3 + rng() * 0.5).toFixed(3)),
-    ipho: Number((0.15 + rng() * 0.45).toFixed(3)),
+  growth_curve[growth_curve.length - 1] = {
+    ts: growth_curve[growth_curve.length - 1].ts,
+    pq,
   };
-  const twin: NineDim[] = NINE_DIMS.map((d) => ({
-    key: d.key,
-    label: d.label,
-    value: dim(),
-    hint: d.hint,
-  }));
-  const board_mastery: Record<string, number> = {};
-  for (const b of BOARDS) board_mastery[b] = Number((0.3 + rng() * 0.6).toFixed(3));
-  const data: MockData = {
-    pq: Number(pq.toFixed(3)),
+  const readiness = Gen.computeReadiness(twin);
+  const board_mastery = Gen.computeBoardMastery(twin);
+  const weak = [...twin].sort((a, b) => a.value - b.value).slice(0, 3).map((d) => d.label);
+  const recs = sample(REC_POOL, 3, rng);
+  return {
+    pq,
     radar,
     growth_curve,
     readiness,
     twin,
-    weak_concepts: sample(WEAK_POOL, 2 + Math.floor(rng() * 2), rng),
-    recommendations: sample(REC_POOL, 3, rng),
+    weak_concepts: weak,
+    recommendations: recs,
     board_mastery,
   };
+}
+
+function mockDashboard(id: string): MockData {
+  // 若已存在持久化孪生（新学生初始化 / 训练回写），实时推导以反映最新状态
+  const stored = getStoredTwin(id);
+  if (stored) return buildMockFromTwin(id, stored);
+  const cached = mockCache.get(id);
+  if (cached) return cached;
+  const rng = makeRng(hashStr(id || "guest"));
+  const twin: NineDim[] = NINE_DIMS.map((d) => ({
+    key: d.key,
+    label: d.label,
+    value: Number((0.3 + rng() * 0.65).toFixed(3)),
+    hint: d.hint,
+  }));
+  const data = buildMockFromTwin(id, twin);
   mockCache.set(id, data);
   return data;
 }
@@ -418,6 +586,11 @@ export function createStudent(input: CreateStudentRequest): Promise<Student> {
     created_at: new Date().toISOString(),
     pq: mockPq(`stu_${input.name}`),
   };
+  // 初始化数字孪生基线并持久化：新建学生立即拥有有意义的能力雷达
+  const twin = baselineTwin(stu.student_id, stu.name);
+  setStoredTwin(stu.student_id, twin);
+  const mean = twin.reduce((s, d) => s + d.value, 0) / twin.length;
+  stu.pq = Number(clamp(0.2 + 0.8 * mean, 0, 0.99).toFixed(3));
   list.push(stu);
   saveStudents(list);
   return Promise.resolve(stu);
@@ -449,7 +622,7 @@ export function updateStudent(
 }
 
 export function sendChat(input: SendChatRequest): Promise<SendChatResponse> {
-  const text = offlineTutor(input.message, getCoachLang());
+  const text = mentorGenerate(input.message, input.student_id) ?? offlineTutor(input.message, getCoachLang());
   return Promise.resolve({
     session_id: `off_${Date.now()}`,
     reply: text,
@@ -463,7 +636,7 @@ export async function streamChat(
   handlers: StreamHandlers,
 ): Promise<void> {
   const lang = getCoachLang();
-  const full = offlineTutor(input.message, lang);
+  const full = mentorGenerate(input.message, input.student_id) ?? offlineTutor(input.message, lang);
   const chunks = chunkText(full);
   for (const c of chunks) {
     handlers.onDelta?.(c);
@@ -506,7 +679,70 @@ export function getDashboard(studentId: string): Promise<Dashboard> {
 }
 
 export function getTraining(studentId: string): Promise<TrainingPlan> {
-  return Promise.resolve(mockTraining(studentId));
+  // 个性化：依据数字孪生九维画像生成 4 周计划 + 今日规划（聚焦最弱板块）
+  const d = mockDashboard(studentId);
+  const gen = Gen.generateWeeklyTraining(d.twin, d.weak_concepts, []);
+  return Promise.resolve({
+    weekly: gen.weekly,
+    today: gen.today,
+    rationale: gen.rationale,
+  });
+}
+
+// ---------------------------------------------------------------- 生成 / 反馈（供视图直接调用）
+export function getBugCategories(): BugCategory[] {
+  return BUG_CATEGORIES;
+}
+
+export function generateCompetitionQuestion(board: Board, difficulty: number): Gen.GeneratedQuestion {
+  return Gen.generateCompetitionQuestion(board, difficulty);
+}
+
+export function generateTrainingForNode(
+  nodeName: string,
+  board: Board,
+  mastery: number,
+): Gen.GeneratedTraining {
+  return Gen.generateTrainingForNode(nodeName, board, mastery);
+}
+
+export function generateMistakeAnalysis(
+  topic: string,
+  summary: string,
+  categoryId?: string,
+): Gen.MistakeAnalysis {
+  const cat = categoryId ? BUG_CATEGORIES.find((c) => c.id === categoryId) ?? null : null;
+  return Gen.generateMistakeAnalysis(topic, summary, cat);
+}
+
+/** 完成某板块训练后回写九维增量并 bump PQ，返回最新评估。 */
+export function applyMasteryDelta(
+  studentId: string,
+  delta: Record<string, number>,
+): StudentUpdate {
+  const twin = getStoredTwin(studentId) ?? baselineTwin(studentId, studentId);
+  let changed = false;
+  for (const d of twin) {
+    if (delta[d.key] != null) {
+      d.value = Number(clamp(d.value + delta[d.key], 0, 1).toFixed(3));
+      changed = true;
+    }
+  }
+  if (changed) setStoredTwin(studentId, twin);
+  const mean = twin.reduce((s, d) => s + d.value, 0) / twin.length;
+  const pq = Number(clamp(0.2 + 0.8 * mean, 0, 0.99).toFixed(3));
+  const d = mockDashboard(studentId);
+  mockCache.delete(studentId);
+  return {
+    pq,
+    mastery_delta: delta,
+    weak_concepts: d.weak_concepts,
+    recommendations: d.recommendations,
+  };
+}
+
+export function getTwin(studentId: string): NineDim[] {
+  return getStoredTwin(studentId) ?? mockDashboard(studentId).twin;
 }
 
 export function getMistakes(studentId: string): Promise<Mistake[]> {
@@ -534,7 +770,7 @@ export function createMistake(studentId: string, data: MistakeCreate): Promise<M
 export function updateMistake(
   studentId: string,
   id: string,
-  data: { status?: string; summary?: string; analysis?: string },
+  data: { status?: string; summary?: string; analysis?: string; bug_id?: string },
 ): Promise<Mistake> {
   const list = getMistakesStore(studentId);
   const m = list.find((x) => x.id === id);
@@ -542,6 +778,7 @@ export function updateMistake(
   if (data.status !== undefined) m.status = data.status;
   if (data.summary !== undefined) m.summary = data.summary;
   if (data.analysis !== undefined) m.analysis = data.analysis;
+  if (data.bug_id !== undefined) m.bug_id = data.bug_id;
   setMistakesStore(studentId, list);
   return Promise.resolve(m);
 }

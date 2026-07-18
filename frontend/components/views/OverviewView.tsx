@@ -19,6 +19,7 @@ import {
   MISTAKES,
 } from "@/lib/pomosData";
 import { getDashboard, getMistakes, type Dashboard, type Mistake } from "@/lib/api";
+import { derivePcdfLayers, type PcdfLayerOut } from "@/lib/offlineGen";
 import { useI18n } from "@/lib/i18n";
 
 function StatCard({
@@ -93,6 +94,8 @@ const OverviewView: React.FC<OverviewViewProps> = ({ studentId, refreshKey }) =>
     ? dash.growth_curve.map((p) => ({ ts: fmtTs(p.ts), pq: Math.round(p.pq * 100) }))
     : SAMPLE_GROWTH;
   const readiness = dash ? dash.readiness : SAMPLE_READINESS;
+  // 诊断分层：有真实孪生时由九维推导，否则回退示例数据
+  const pcdf: PcdfLayerOut[] = dash ? derivePcdfLayers(dash.twin) : [];
 
   const lowest = [...PCDF_LAYERS].sort((a, b) => a.score - b.score)[0];
   // 最弱维度优先取实时数字孪生（动态数据），无数据时回退到静态 PCDF 参考层
@@ -166,6 +169,12 @@ const OverviewView: React.FC<OverviewViewProps> = ({ studentId, refreshKey }) =>
             <ReadinessGauge data={readiness} />
             <div className="mt-2 space-y-1 text-[11px] text-muted-foreground">
               <div className="flex justify-between">
+                <span>省一概率</span>
+                <span className="font-medium text-foreground">
+                  {Math.round(readiness.province_top * 100)}%
+                </span>
+              </div>
+              <div className="flex justify-between">
                 <span>省队概率</span>
                 <span className="font-medium text-foreground">
                   {Math.round(readiness.province_team * 100)}%
@@ -177,6 +186,9 @@ const OverviewView: React.FC<OverviewViewProps> = ({ studentId, refreshKey }) =>
                   {Math.round(readiness.ipho * 100)}%
                 </span>
               </div>
+              <p className="pt-1 text-[10px] leading-relaxed">
+                就绪度由九维数字孪生加权推导（省一 / 省队 / IPhO 三档概率），与能力画像实时挂钩。
+              </p>
             </div>
           </CardContent>
         </Card>
@@ -184,10 +196,10 @@ const OverviewView: React.FC<OverviewViewProps> = ({ studentId, refreshKey }) =>
 
       <Card>
         <CardHeader>
-          <CardTitle>诊断分层健康度</CardTitle>
+          <CardTitle>诊断分层健康度（来自数字孪生）</CardTitle>
         </CardHeader>
         <CardContent className="space-y-2">
-          {PCDF_LAYERS.map((l) => {
+          {(pcdf.length ? pcdf : PCDF_LAYERS).map((l) => {
             const color =
               l.status === "ok"
                 ? "#10b981"
@@ -195,15 +207,21 @@ const OverviewView: React.FC<OverviewViewProps> = ({ studentId, refreshKey }) =>
                   ? "#f59e0b"
                   : "#ef4444";
             return (
-              <div key={l.layer} className="flex items-center gap-3">
-                <span className="w-24 shrink-0 text-xs text-muted-foreground">
-                  L{l.layer} {l.name}
-                </span>
-                <Progress value={l.score} color={color} />
-                <span className="w-10 shrink-0 text-right text-xs font-medium">{l.score}</span>
+              <div key={l.layer} className="space-y-1">
+                <div className="flex items-center gap-3">
+                  <span className="w-24 shrink-0 text-xs text-muted-foreground">
+                    L{l.layer} {l.name}
+                  </span>
+                  <Progress value={l.score} color={color} />
+                  <span className="w-10 shrink-0 text-right text-xs font-medium">{l.score}</span>
+                </div>
+                <p className="pl-24 text-[10px] leading-relaxed text-muted-foreground">{l.note}</p>
               </div>
             );
           })}
+          {!dash && (
+            <p className="pt-1 text-[10px] text-muted-foreground">当前为示例数据；接入画像后显示真实分层。</p>
+          )}
         </CardContent>
       </Card>
     </div>
