@@ -9,7 +9,7 @@ import logging
 import os
 import uuid
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Depends
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -17,6 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.config import settings
+from app.security import verify_token
 from app.database import Base, engine
 from app.api.routes import health, chat, students, settings as settings_router
 
@@ -120,7 +121,7 @@ async def _startup() -> None:
 
 
 # 挂载路由（统一前缀 /api）
-app.include_router(health.router, prefix="/api")
-app.include_router(chat.router, prefix="/api")
-app.include_router(students.router, prefix="/api")
-app.include_router(settings_router.router, prefix="/api")
+app.include_router(health.router, prefix="/api", dependencies=[Depends(verify_token)])
+app.include_router(chat.router, prefix="/api", dependencies=[Depends(verify_token)])
+app.include_router(students.router, prefix="/api", dependencies=[Depends(verify_token)])
+app.include_router(settings_router.router, prefix="/api", dependencies=[Depends(verify_token)])

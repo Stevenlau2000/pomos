@@ -14,6 +14,8 @@ import os
 from pydantic_settings import BaseSettings
 from pydantic import Field
 
+from app.security import assert_ssrf_safe
+
 
 class Settings(BaseSettings):
     """全局配置项。"""
@@ -182,6 +184,12 @@ def validate_settings(data: dict) -> list[str]:
             errors.append("llm_base_url 必须为合法的 http(s) URL")
         elif ".." in url.split("://", 1)[-1]:
             errors.append("llm_base_url 含有非法路径片段")
+        else:
+            # SSRF 防护（技术债 ③）：解析域名并拒绝内网 / 回环 / 保留地址
+            try:
+                assert_ssrf_safe(url)
+            except ValueError as e:
+                errors.append(f"llm_base_url 存在 SSRF 风险：{e}")
 
     if "llm_temperature" in data:
         try:

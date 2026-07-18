@@ -306,7 +306,7 @@ export async function streamChat(
   handlers: StreamHandlers,
   signal?: AbortSignal,
 ): Promise<void> {
-  if (offlineMode()) return offline.streamChat(input, handlers);
+  if (offlineMode()) return offline.streamChat(input, handlers, signal);
 
   const res = await fetch(`${API_BASE}/api/chat/stream`, {
     method: "POST",

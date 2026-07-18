@@ -368,7 +368,12 @@ function findStudent(id: string): Student | undefined {
 }
 
 function mockPq(id: string): number {
-  return Number((0.42 + makeRng(hashStr(id || "guest"))() * 0.45).toFixed(3));
+  const rng = makeRng(hashStr(id || "guest"));
+  const twin: Record<string, number> = {};
+  for (const d of NINE_DIMS) {
+    twin[d.key] = Number((0.3 + rng() * 0.65).toFixed(3));
+  }
+  return pqFromTwin(twin);
 }
 
 function bumpPq(id: string, pq: number): void {
@@ -449,6 +454,20 @@ const NINE_DIMS: { key: string; label: string; hint: string }[] = [
   { key: "competition", label: "竞赛素养", hint: "竞赛策略与压轴题经验" },
   { key: "growth", label: "成长态势", hint: "持续训练与提升趋势" },
 ];
+
+// ---------------------------------------------------------------- PQ 单源推导（技术债 ⑤）
+// 所有生成 PQ 的入口统一经 pqFromTwin，确保顶栏 PQ 与 getDashboard 重算值同源、无随机抖动。
+function twinToMap(twin: Array<{ key: string; value: number }>): Record<string, number> {
+  const m: Record<string, number> = {};
+  for (const dim of twin) m[dim.key] = dim.value;
+  return m;
+}
+
+function pqFromTwin(twin: Record<string, number>): number {
+  const vals = NINE_DIMS.map((d) => twin[d.key] ?? 0);
+  const mean = vals.reduce((a, b) => a + b, 0) / (vals.length || 1);
+  return clamp(0.2 + 0.8 * mean, 0, 0.99);
+}
 const BOARDS = ["力学", "电磁学", "热学", "光学", "近代物理"];
 const WEAK_POOL = [
   "转动参考系下的惯性力处理",
@@ -484,8 +503,7 @@ const mockCache = new Map<string, MockData>();
 /** 由九维孪生推导完整的仪表盘数据（就绪度 / 板块掌握度 / 雷达均自洽）。 */
 function buildMockFromTwin(id: string, twin: NineDim[]): MockData {
   const tq = (k: string) => twin.find((d) => d.key === k)?.value ?? 0.5;
-  const mean = twin.reduce((s, d) => s + d.value, 0) / twin.length;
-  const pq = Number(clamp(0.2 + 0.8 * mean, 0, 0.99).toFixed(3));
+  const pq = pqFromTwin(twinToMap(twin));
   const radar: PqRadar = {
     knowledge: tq("concept"),
     modeling: tq("modeling"),
@@ -579,18 +597,17 @@ export function getHealth(): Promise<HealthResponse> {
 
 export function createStudent(input: CreateStudentRequest): Promise<Student> {
   const list = ensureStudents();
+  const id = `stu_${Math.random().toString(36).slice(2, 10)}`;
+  // 初始化数字孪生基线并持久化：新建学生立即拥有有意义的能力雷达
+  const twin = baselineTwin(id, input.name);
+  setStoredTwin(id, twin);
   const stu: Student = {
-    student_id: `stu_${Math.random().toString(36).slice(2, 10)}`,
+    student_id: id,
     name: input.name,
     grade: input.grade || "",
     created_at: new Date().toISOString(),
-    pq: mockPq(`stu_${input.name}`),
+    pq: pqFromTwin(twinToMap(twin)),
   };
-  // 初始化数字孪生基线并持久化：新建学生立即拥有有意义的能力雷达
-  const twin = baselineTwin(stu.student_id, stu.name);
-  setStoredTwin(stu.student_id, twin);
-  const mean = twin.reduce((s, d) => s + d.value, 0) / twin.length;
-  stu.pq = Number(clamp(0.2 + 0.8 * mean, 0, 0.99).toFixed(3));
   list.push(stu);
   saveStudents(list);
   return Promise.resolve(stu);
@@ -634,11 +651,16 @@ export function sendChat(input: SendChatRequest): Promise<SendChatResponse> {
 export async function streamChat(
   input: SendChatRequest,
   handlers: StreamHandlers,
+  signal?: AbortSignal,
 ): Promise<void> {
   const lang = getCoachLang();
   const full = mentorGenerate(input.message, input.student_id) ?? offlineTutor(input.message, lang);
   const chunks = chunkText(full);
   for (const c of chunks) {
+    if (signal?.aborted) {
+      handlers.onError?.("已取消生成");
+      return;
+    }
     handlers.onDelta?.(c);
     await sleep(16);
   }
@@ -729,8 +751,7 @@ export function applyMasteryDelta(
     }
   }
   if (changed) setStoredTwin(studentId, twin);
-  const mean = twin.reduce((s, d) => s + d.value, 0) / twin.length;
-  const pq = Number(clamp(0.2 + 0.8 * mean, 0, 0.99).toFixed(3));
+  const pq = pqFromTwin(twinToMap(twin));
   const d = mockDashboard(studentId);
   mockCache.delete(studentId);
   return {
@@ -831,8 +852,7 @@ export function putSettings(data: Partial<SettingsResponse>): Promise<SettingsRe
 // ================================================================ 内部辅助（供 api.ts 调用）
 export function buildStudentUpdate(studentId: string): StudentUpdate {
   const d = mockDashboard(studentId);
-  const rng = makeRng(hashStr(studentId) + 13);
-  const pq = clamp(d.pq + 0.008 + rng() * 0.02);
+  const pq = pqFromTwin(twinToMap(d.twin));
   return {
     pq: Number(pq.toFixed(3)),
     mastery_delta: {},
