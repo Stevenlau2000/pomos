@@ -8,14 +8,14 @@
 .vscode/
 
 # ---------- Python / 后端 ----------
-backend/__pycache__/
-backend/*/__pycache__/
+**/__pycache__/
+**/*.py[cod]
 backend/.venv/
 backend/venv/
 backend/*.db
 backend/runtime_settings.json
 backend/uploads/
-backend/.pytest_cache/
+**/.pytest_cache/
 *.egg-info/
 
 # ---------- Node / 前端 ----------
