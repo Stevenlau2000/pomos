@@ -1,5 +1,5 @@
 // components/views/OverviewView.tsx
-// 能力总览：PQ 雷达 + 学习曲线 + 就绪度 + 关键指标卡。
+// 能力总览：PQ 雷达 + 学习曲线 + 关键指标卡。
 // 现在从后端 /api/students/{id}/dashboard 拉取真实数据，失败回退静态示例。
 "use client";
 
