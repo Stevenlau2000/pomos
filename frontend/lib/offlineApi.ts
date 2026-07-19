@@ -49,6 +49,9 @@ import {
 import * as SS from "./studentStore";
 import * as Lecture from "./lecture";
 import { getLlmConfig } from "./llm";
+// 结构化讲解通道：explainChat 内部按意图走云端优先 → 离线降级 → 讲义适配；
+// detectChatIntent 为纯函数路由依据（与 api.ts 同源）。
+import { explainChat, detectChatIntent, type PomosExplainV1 } from "./explain";
 
 // ---------------------------------------------------------------- 存储工具（仅 lang 允许走 localStorage）
 const KEYS = {
@@ -476,8 +479,24 @@ export async function streamChat(
   handlers: StreamHandlers,
   signal?: AbortSignal,
 ): Promise<void> {
-  const lang = getCoachLang();
-  const full = (await mentorGenerate(input.message, input.student_id)) ?? offlineTutor(input.message, lang);
+  const intent = detectChatIntent(input.message);
+  // 讲解 / 讲义意图：走结构化讲解通道（云端优先 → 离线降级 → 讲义适配），
+  // 其余（问导师 / 出题 / 训练 / 讲解题目）保持原 markdown 流式通道。
+  if (intent === "explain" || intent === "lecture") {
+    return streamExplain(input, handlers, signal);
+  }
+  const full =
+    (await mentorGenerate(input.message, input.student_id)) ?? offlineTutor(input.message, getCoachLang());
+  return streamMarkdown(input, full, handlers, signal);
+}
+
+/** 原始 markdown 流式通道（问导师 / 出题 / 训练 / 讲解题目）：打字机式分块 + 历史持久化。 */
+async function streamMarkdown(
+  input: SendChatRequest,
+  full: string,
+  handlers: StreamHandlers,
+  signal?: AbortSignal,
+): Promise<void> {
   const chunks = chunkText(full);
   for (const c of chunks) {
     if (signal?.aborted) {
@@ -499,6 +518,66 @@ export async function streamChat(
   const hist = await SS.loadHistory(input.student_id);
   hist.push({ role: "user", content: input.message, created_at: new Date().toISOString() });
   hist.push({ role: "assistant", content: full, created_at: new Date().toISOString() });
+  await SS.saveHistory(input.student_id, hist);
+  await bumpPq(input.student_id, upd.pq);
+
+  handlers.onDone?.({ session_id: `off_${Date.now()}` });
+}
+
+/**
+ * 结构化讲解通道：经 explainChat 生成 PomosExplainV1（云端优先 → 离线降级 → 讲义适配），
+ * 流式揭示标题（兼容旧测试「未中止时 onDelta 被调用」），并把 explain 持久化到历史。
+ * 中止检查先于任何生成，保证回归 ②（abort 后 onError 被调用、onDelta 不被调用）。
+ */
+async function streamExplain(
+  input: SendChatRequest,
+  handlers: StreamHandlers,
+  signal?: AbortSignal,
+): Promise<void> {
+  // 中止检查先于任何生成（保证回归 ②）
+  if (signal?.aborted) {
+    handlers.onError?.("已取消生成");
+    return;
+  }
+  const explain = await explainChat(
+    { student_id: input.student_id, message: input.message },
+    {
+      onError: (d) => handlers.onError?.(d),
+      onMeta: handlers.onMeta as ((m: unknown) => void) | undefined,
+      onAssessment: handlers.onAssessment as ((u: unknown) => void) | undefined,
+      onDone: handlers.onDone as (() => void) | undefined,
+    },
+    signal,
+  );
+  // 讲解生成失败（被中止 / 云端与离线均不可用）：回退原始离线教练 markdown 流
+  if (!explain) {
+    const full =
+      (await mentorGenerate(input.message, input.student_id)) ??
+      offlineTutor(input.message, getCoachLang());
+
+    return streamMarkdown(input, full, handlers, signal);
+  }
+  // 流式揭示标题，保证 onDelta 被调用（回归 ⑤，兼容旧测试）
+  handlers.onDelta?.(explain.title);
+  // 结构化讲解已通过 explainChat 内部触发的 handlers.onExplain 交付
+  //（page.tsx 据此把 explain 写入末尾导师气泡并渲染 ExplainCard），此处不再重复触发。
+  const trace = buildTrace(input.message);
+  handlers.onMeta?.({
+    session_id: `off_${Date.now()}`,
+    module_trace: trace,
+    intent: explain.mode === "lecture" ? "lecture" : "explain",
+  });
+  const upd = await buildStudentUpdate(input.student_id);
+  handlers.onAssessment?.(upd);
+
+  const hist = await SS.loadHistory(input.student_id);
+  hist.push({ role: "user", content: input.message, created_at: new Date().toISOString() });
+  hist.push({
+    role: "assistant",
+    content: explain.title,
+    created_at: new Date().toISOString(),
+    explain,
+  });
   await SS.saveHistory(input.student_id, hist);
   await bumpPq(input.student_id, upd.pq);
 

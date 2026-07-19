@@ -1,63 +1,109 @@
 classDiagram
-    class ModuleBase {
-        <<abstract>>
-        +name: str
-        +layer: str
-        +spec: str
-        +run(ctx: dict) dict*
+    %% ---------- 数据契约 ----------
+    class PomosExplainV1 {
+        +schema_version: "1.0"
+        +title: string
+        +mode: "cloud" | "offline" | "lecture"
+        +steps: ExplainStep[]
+        +sources?: string[]
+        +offline_fallback?: boolean
     }
-    class CommonHelpers {
-        <<module app.modules._common>>
-        +WEAK_THRESHOLD: float
-        +_lang(ctx) str
-        +safe_twin(ctx) dict
-        +pick(zh, en, ctx) str
+    class ExplainStep {
+        +id: string
+        +phase: ExplainPhase
+        +heading: string
+        +text: string
+        +formulas?: string[]
+        +diagram?: DiagramSpec
+        +animation?: AnimationSpec
+        +misconception?: string
+        +sourceRefs?: string[]
     }
-    class DataLayer {
-        <<package app.data>>
-        KG_NODES / KG_LINKS / KG_BOARDS
-        PROBLEM_BANK
-        INQUIRY_TEMPLATES
+    class DiagramSpec {
+        +kind: DiagramKind
+        +spec: Record~string,unknown~
+        +caption?: string
     }
-    class AssessmentEngine {
-        <<module>>
-        +NINE_DIMS: list
-        +detect_misconceptions(msg, lang) list
+    class AnimationSpec {
+        +type: AnimationType
+        +params: Record~string,number|string~
+        +durationMs?: number
+        +caption?: string
     }
-    class IdentityModule { +run(ctx) dict }
-    class MissionModule { +run(ctx) dict }
-    class PhilosophyModule { +run(ctx) dict }
-    class KnowledgeGraphModule { +run(ctx) dict +weak_nodes() +prereq_path() }
-    class PhysicsThinkingModule { +run(ctx) dict +trace_thinking() }
-    class OlympiadProblemModule { +run(ctx) dict +recommend_problem() +adapt_problem() }
-    class ScientificInquiryModule { +run(ctx) dict +design_experiment() +error_analysis() +data_fitting() }
-    class LearningOrchestrationModule { +run(ctx) dict +weekly_plan() +daily_plan() +priority_score() }
-    class MultimodalModule { +run(ctx) dict +detect_modality() }
+    class ExplainPhase {
+        <<enum>>
+        问题拆解 概念辨析 数理推导 图像分析 结论 易错点
+    }
+    class DiagramKind {
+        <<enum>>
+        force trajectory vt circuit light pv wave mermaid
+    }
+    class AnimationType {
+        <<enum>>
+        projectile uniform-motion wave charge-in-field refraction
+    }
+    PomosExplainV1 "1" *-- "many" ExplainStep
+    ExplainStep "1" *-- "0..1" DiagramSpec
+    ExplainStep "1" *-- "0..1" AnimationSpec
 
-    ModuleBase <|-- IdentityModule
-    ModuleBase <|-- MissionModule
-    ModuleBase <|-- PhilosophyModule
-    ModuleBase <|-- KnowledgeGraphModule
-    ModuleBase <|-- PhysicsThinkingModule
-    ModuleBase <|-- OlympiadProblemModule
-    ModuleBase <|-- ScientificInquiryModule
-    ModuleBase <|-- LearningOrchestrationModule
-    ModuleBase <|-- MultimodalModule
+    %% ---------- 消息模型 ----------
+    class ChatMessage {
+        +role: "user" | "mentor"
+        +content: string
+        +moduleTrace?: ModuleTrace[]
+        +assessment?: StudentUpdate
+        +explain?: PomosExplainV1
+    }
 
-    IdentityModule ..> CommonHelpers : _lang/pick
-    PhilosophyModule ..> CommonHelpers : _lang/pick
-    KnowledgeGraphModule ..> CommonHelpers : safe_twin/_lang
-    KnowledgeGraphModule ..> DataLayer : KG_NODES/KG_LINKS
-    PhysicsThinkingModule ..> CommonHelpers : safe_twin/_lang
-    OlympiadProblemModule ..> CommonHelpers : safe_twin/_lang
-    OlympiadProblemModule ..> DataLayer : PROBLEM_BANK
-    ScientificInquiryModule ..> CommonHelpers : safe_twin/_lang
-    ScientificInquiryModule ..> DataLayer : INQUIRY_TEMPLATES
-    LearningOrchestrationModule ..> CommonHelpers : safe_twin
-    MultimodalModule ..> CommonHelpers : _lang
+    %% ---------- 编排层 ----------
+    class ExplainOrchestrator {
+        +detectChatIntent(msg): Intent
+        +generateExplain(msg, sid, signal?): PomosExplainV1
+        +explainChat(input, handlers, signal?)
+        +validateExplain(raw): PomosExplainV1 | null
+        +EXPLAIN_MAX_TOKENS = 2000
+    }
+    class CloudExplain {
+        +callCloudExplain(msg): PomosExplainV1
+    }
+    class OfflineExplainer {
+        +generateExplainOffline(msg, sid): PomosExplainV1
+        -matchTopic(msg): Topic
+        -buildSixPhases(topic): ExplainStep[]
+    }
+    class LectureAdapter {
+        +lectureToExplain(r: LectureResult): PomosExplainV1
+    }
+    class OfflineExplainTemplates {
+        +byKeyword: Map~string, DiagramSpec|AnimationSpec~
+    }
+    ExplainOrchestrator ..> CloudExplain : 优先
+    ExplainOrchestrator ..> OfflineExplainer : 降级
+    OfflineExplainer ..> OfflineExplainTemplates : 预置图/动画
+    LectureAdapter ..> PomosExplainV1 : 产出
 
-    KnowledgeGraphModule ..> AssessmentEngine : NINE_DIMS
-    PhysicsThinkingModule ..> AssessmentEngine : NINE_DIMS
-    OlympiadProblemModule ..> AssessmentEngine : NINE_DIMS
-    ScientificInquiryModule ..> AssessmentEngine : NINE_DIMS
-    LearningOrchestrationModule ..> AssessmentEngine : NINE_DIMS
+    %% ---------- 渲染层 ----------
+    class ExplainCard {
+        +explain: PomosExplainV1
+        +render() 150ms 渐进揭示
+    }
+    class StepBlock
+    class DiagramRenderer {
+        +render(kind, spec)
+    }
+    class AnimationPlayer {
+        +spec: AnimationSpec
+        +play() pause() replay()
+        +firstFrame() 保底
+    }
+    class MermaidRenderer
+    class KaTeXRichText
+    class SourceRefs
+    ExplainCard "1" *-- "many" StepBlock
+    ExplainCard ..> DiagramRenderer
+    ExplainCard ..> AnimationPlayer
+    ExplainCard ..> KaTeXRichText
+    ExplainCard ..> SourceRefs
+    DiagramRenderer ..> MermaidRenderer : kind=mermaid
+    ChatMessage ..> ExplainCard : explain? 优先
+    ChatMessage ..> KaTeXRichText : 无 explain 走 markdown

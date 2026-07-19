@@ -1,28 +1,62 @@
 sequenceDiagram
     autonumber
-    participant O as orchestrator._dispatch
-    participant M as 目标模块.run(ctx)
-    participant C as _common
-    participant D as app.data
-    participant A as assessment_engine
+    actor U as 学生
+    participant P as page.tsx(handleSend)
+    participant A as api.streamChat
+    participant O as ExplainOrchestrator
+    participant L as llm.chatCompletion
+    participant OFF as OfflineExplainer
+    participant TB as textbookRetriever
+    participant B as MessageBubble
+    participant E as ExplainCard
+    participant D as DiagramRenderer
+    participant AN as AnimationPlayer
+    participant K as KaTeXRichText
 
-    O->>O: _classify_intent(message) → intent
-    O->>O: ctx["twin"] = state.get("twin") or {}
-    O->>O: student_ctx.setdefault("twin", ...)
-    O->>M: primary.run(ctx)
-    M->>M: if not isinstance(ctx,dict): ctx={}
-    M->>C: safe_twin(ctx) / _lang(ctx)
-    C-->>M: twin(NINE_DIMS归一) / lang
-    M->>A: NINE_DIMS (复用，不重定义)
-    M->>D: KG_NODES / PROBLEM_BANK / INQUIRY_TEMPLATES
-    D-->>M: 内置数据
-    M->>M: 内部纯函数(weak_nodes / trace_thinking / recommend_problem / ...)
-    alt 空 ctx / 缺字段
-        M-->>M: 回退默认(全0 twin / 默认 board / 默认 goal)
+    U->>P: 发送问题（如「斜抛为何水平匀速」）
+    P->>A: streamChat(input, handlers, signal)
+    A->>O: detectChatIntent(msg)
+    alt 非 explain 意图（生成讲义/出题/训练/讲解题）
+        A-->>P: onDelta(markdown) 走既有通道
+    else explain 意图
+        A->>O: explainChat(input, handlers, signal)
+        O->>O: isConfigured() && navigator.onLine !== false ?
+        alt 云端可用
+            O->>L: chatCompletion(sys+user, maxTokens=2000, stream=false)
+            L-->>O: JSON 文本
+            O->>O: validateExplain(JSON) → PomosExplainV1?
+            alt 解析+校验成功
+                O-->>A: explain(mode:"cloud")
+            else 解析/校验失败（半截JSON/字段缺失）
+                O->>OFF: generateExplainOffline(msg, sid)
+                OFF->>TB: searchTextbooks(topic)
+                TB-->>OFF: 教材出处
+                OFF-->>O: explain(mode:"offline", offline_fallback:true)
+            end
+        else 离线/未配置密钥
+            O->>OFF: generateExplainOffline(msg, sid)
+            OFF->>TB: searchTextbooks(topic)
+            TB-->>OFF: 教材出处
+            OFF-->>O: explain(mode:"offline")
+        end
+        O-->>A: handlers.onExplain(explain)
+        A-->>P: onMeta(trace) / onAssessment(update) / onDone
+        P->>P: setMessages(mentor.explain = explain)
+        P->>B: 渲染消息（explain 存在）
+        B->>E: ExplainCard 消费 explain
+        E->>E: 150ms 间隔逐 step 揭示（前2步展开）
+        loop 每个 step
+            E->>K: 渲染 text + formulas(KaTeX)
+            opt step.diagram
+                E->>D: render(kind, spec)
+                D-->>E: SVG / Mermaid 图表
+            end
+            opt step.animation
+                E->>AN: AnimationPlayer(spec)
+                AN-->>E: 首帧 + 播放/暂停/重播
+            end
+            opt step.sourceRefs
+                E->>E: 教材引用区标签
+            end
+        end
     end
-    M-->>O: {module, action, output:{...}, next}
-    O->>O: student_ctx.update(output)
-    O->>O: 调 m16 系统大脑协调
-    Note over M: m15 特例：detect_modality 命中 image/formula → next="external_multimodal_required"，不抛异常
-
-    Note over O,M: 静态类 m01/m02/m03：run 仅读 student_id，其余走 build_identity/build_mission/build_philosophy(lang)，输出含 service_boundary / philosophy_templates(≥3)

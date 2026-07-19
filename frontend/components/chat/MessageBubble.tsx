@@ -1,15 +1,17 @@
 // components/chat/MessageBubble.tsx
-// 消息气泡：渲染 markdown + KaTeX（react-katex）+ ```mermaid``` 代码块（mermaid 渲染）。
+// 消息气泡：渲染 markdown + KaTeX（react-katex）+ ```mermaid``` 代码块（懒加载 Mermaid）。
+// 另：mentor 消息若携带 explain（PomosExplainV1），优先渲染富卡片 ExplainCard（懒加载）。
 "use client";
 
 import * as React from "react";
+import dynamic from "next/dynamic";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { BlockMath, InlineMath } from "react-katex";
-import mermaid from "mermaid";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import type { ModuleTrace, StudentUpdate } from "@/lib/api";
+import type { PomosExplainV1 } from "@/lib/explain/types";
 import "katex/dist/katex.min.css";
 
 /** 单条聊天消息 */
@@ -20,44 +22,25 @@ export interface ChatMessage {
   moduleTrace?: ModuleTrace[];
   /** 本轮对话的评估结果（PQ / 弱概念 / 建议） */
   assessment?: StudentUpdate;
+  /** 结构化详细讲解（云端 / 离线 / 讲义 三源同源）；存在时优先渲染富卡片 */
+  explain?: PomosExplainV1;
 }
 
-// ---------- Mermaid 渲染组件 ----------
+// ---------- Mermaid 渲染组件（懒加载 mermaid 库，避免顶部直引拖慢首屏） ----------
+const MermaidView = dynamic(() => import("@/components/explain/MermaidView"), { ssr: false });
 
-interface MermaidProps {
-  code: string;
-}
-
-const Mermaid: React.FC<MermaidProps> = ({ code }) => {
-  const ref = React.useRef<HTMLDivElement>(null);
-  const [error, setError] = React.useState<string | null>(null);
-
-  React.useEffect(() => {
-    mermaid.initialize({ startOnLoad: false, theme: "default", securityLevel: "strict" });
-    let cancelled = false;
-    const id = `mermaid-${Math.random().toString(36).slice(2)}`;
-    mermaid
-      .render(id, code)
-      .then(({ svg }) => {
-        if (!cancelled && ref.current) ref.current.innerHTML = svg;
-      })
-      .catch((e: unknown) => {
-        if (!cancelled) setError(String(e));
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [code]);
-
-  if (error) {
-    return (
-      <pre className="rounded-md bg-muted p-3 text-xs text-destructive">
-        {error}
-      </pre>
-    );
-  }
-  return <div ref={ref} className="my-2 flex justify-center" />;
-};
+// ---------- 结构化讲解卡片（懒加载） ----------
+const ExplainCard = dynamic(
+  () => import("@/components/explain/ExplainCard").then((m) => m.ExplainCard),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="rounded-md border border-border bg-card px-4 py-3 text-xs text-muted-foreground">
+        讲解加载中…
+      </div>
+    ),
+  },
+);
 
 // ---------- 数学公式片段解析 ----------
 
@@ -141,6 +124,7 @@ interface MessageBubbleProps {
 
 const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
   const isUser = message.role === "user";
+  const hasExplain = !isUser && !!message.explain && message.explain.steps?.length > 0;
   return (
     <div
       className={cn(
@@ -156,26 +140,30 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
             : "border border-border bg-card text-card-foreground",
         )}
       >
-        {splitSegments(message.content).map((seg, i) => {
-          if (seg.type === "code") {
-            if (seg.lang === "mermaid") {
-              return <Mermaid key={i} code={seg.value} />;
+        {hasExplain ? (
+          <ExplainCard explain={message.explain!} />
+        ) : (
+          splitSegments(message.content).map((seg, i) => {
+            if (seg.type === "code") {
+              if (seg.lang === "mermaid") {
+                return <MermaidView key={i} code={seg.value} />;
+              }
+              return (
+                <pre
+                  key={i}
+                  className="my-2 overflow-x-auto rounded-md bg-muted p-3 text-xs"
+                >
+                  <code>{seg.value}</code>
+                </pre>
+              );
             }
             return (
-              <pre
-                key={i}
-                className="my-2 overflow-x-auto rounded-md bg-muted p-3 text-xs"
-              >
-                <code>{seg.value}</code>
-              </pre>
+              <div key={i} className="prose prose-sm max-w-none">
+                <RichText text={seg.value} />
+              </div>
             );
-          }
-          return (
-            <div key={i} className="prose prose-sm max-w-none">
-              <RichText text={seg.value} />
-            </div>
-          );
-        })}
+          })
+        )}
 
         {!isUser && message.moduleTrace && message.moduleTrace.length > 0 && (
           <div className="mt-3 flex flex-wrap gap-1 border-t border-border pt-2">

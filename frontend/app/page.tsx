@@ -16,6 +16,7 @@ import ModulesView from "@/components/views/ModulesView";
 import SettingsPanel from "@/components/settings/SettingsPanel";
 import KnowledgeBaseDrawer from "@/components/knowledge/KnowledgeBaseDrawer";
 import type { ChatMessage } from "@/components/chat/MessageBubble";
+import type { PomosExplainV1 } from "@/lib/explain/types";
 import {
   getHealth,
   getChatHistory,
@@ -129,6 +130,7 @@ function WorkspaceInner() {
             msgs.map((m) => ({
               role: m.role === "assistant" ? "mentor" : "user",
               content: m.content,
+              explain: m.explain,
             })),
           );
         }
@@ -192,6 +194,17 @@ function WorkspaceInner() {
           },
           onDone: () => {
             setRefreshKey((k) => k + 1); // 画像/评估已变动，刷新数据视图
+          },
+          // 结构化讲解交付：写入末尾导师气泡，由 MessageBubble 优先渲染 ExplainCard
+          onExplain: (e: PomosExplainV1) => {
+            setMessages((prev) => {
+              const copy = [...prev];
+              const last = copy[copy.length - 1];
+              if (last && last.role === "mentor") {
+                copy[copy.length - 1] = { ...last, explain: e };
+              }
+              return copy;
+            });
           },
           onError: (detail) => {
             // 「已取消生成」是主动中止（切视图 / 重入）的哨兵：静默丢弃末尾占位气泡，不展示误导错误。

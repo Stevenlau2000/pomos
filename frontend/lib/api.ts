@@ -10,6 +10,7 @@ import * as offline from "./offlineApi";
 import type { GeneratedQuestion, GeneratedTraining, MistakeAnalysis } from "./offlineGen";
 import type { LectureResult } from "./lecture";
 import type { Board, BugCategory } from "./physicsKB";
+import type { PomosExplainV1 } from "./explain/types";
 
 /** 讲义生成上下文（与 lib/lecture.ts LectureContext 同构，供 UI 直接构造）。 */
 export interface LectureContext {
@@ -355,6 +356,8 @@ export type StreamEvent =
 /** 流式事件回调 */
 export interface StreamHandlers {
   onDelta?: (text: string) => void;
+  /** 结构化详细讲解（PomosExplainV1）交付；存在时 UI 优先渲染富卡片而非 markdown。 */
+  onExplain?: (e: PomosExplainV1) => void;
   onMeta?: (meta: { session_id: string; module_trace: ModuleTrace[]; intent?: string }) => void;
   onAssessment?: (u: StudentUpdate) => void;
   onDone?: (meta: { session_id: string }) => void;
@@ -442,6 +445,8 @@ export interface HistoryMessage {
   role: "user" | "assistant";
   content: string;
   created_at: string;
+  /** 结构化详细讲解（可选，纯 JSON 直存 IndexedDB，旧消息无此字段） */
+  explain?: PomosExplainV1;
 }
 
 /** 对话单条消息（与 HistoryMessage 同构，供 studentStore / 迁移层持久化使用）。 */
@@ -449,6 +454,8 @@ export interface ChatMessage {
   role: "user" | "assistant";
   content: string;
   created_at: string;
+  /** 结构化详细讲解（可选，纯 JSON 直存 IndexedDB，旧消息无此字段） */
+  explain?: PomosExplainV1;
 }
 
 /** 获取对话历史 */
