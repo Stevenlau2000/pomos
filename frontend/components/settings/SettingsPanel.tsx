@@ -22,6 +22,7 @@ import {
   updateStudent,
   createStudent,
   getApiMode,
+  keyFieldFor,
   type SettingsResponse,
 } from "@/lib/api";
 import { useI18n, type Locale } from "@/lib/i18n";
@@ -37,29 +38,6 @@ const PROVIDER_OPTIONS: { value: string; label: string }[] = [
   { value: "anthropic", label: "Claude (Anthropic)" },
   { value: "custom", label: "自定义 (OpenAI 兼容)" },
 ];
-
-function keyFieldFor(provider: string): keyof SettingsResponse {
-  switch (provider) {
-    case "openai":
-      return "openai_api_key";
-    case "deepseek":
-      return "deepseek_api_key";
-    case "qwen":
-      return "dashscope_api_key";
-    case "moonshot":
-      return "moonshot_api_key";
-    case "zhipu":
-      return "zhipu_api_key";
-    case "gemini":
-      return "gemini_api_key";
-    case "anthropic":
-      return "anthropic_api_key";
-    case "custom":
-      return "llm_api_key";
-    default:
-      return "llm_api_key";
-  }
-}
 
 interface SettingsPanelProps {
   open: boolean;

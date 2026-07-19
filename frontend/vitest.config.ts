@@ -16,5 +16,8 @@ export default defineConfig({
     environment: "node",
     include: ["test/**/*.test.ts"],
     globals: false,
+    // 在 Node 中注入内存版 IndexedDB（fake-indexeddb/auto），
+    // 供 studentStore / offlineApi 的离线读写（按 student_id 隔离）测试使用。
+    setupFiles: ["./test/setup.ts"],
   },
 });

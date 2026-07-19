@@ -8,13 +8,11 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { TrendingUp, Target, Bug, BookOpen } from "lucide-react";
 import PqRadar from "@/components/dashboard/PqRadar";
 import LearningCurve from "@/components/dashboard/LearningCurve";
-import ReadinessGauge from "@/components/dashboard/ReadinessGauge";
 import Progress from "@/components/ui/progress";
 import {
   SAMPLE_PQ,
   SAMPLE_RADAR,
   SAMPLE_GROWTH,
-  SAMPLE_READINESS,
   PCDF_LAYERS,
   MISTAKES,
   type PcdfLayer,
@@ -58,6 +56,12 @@ function fmtTs(ts: number | string): string {
   return `${d.getMonth() + 1}/${d.getDate()}`;
 }
 
+function colorFor(v: number): string {
+  if (v >= 75) return "#10b981";
+  if (v >= 60) return "#f59e0b";
+  return "#ef4444";
+}
+
 interface OverviewViewProps {
   studentId: string;
   refreshKey?: number;
@@ -93,7 +97,21 @@ const OverviewView: React.FC<OverviewViewProps> = ({ studentId, refreshKey }) =>
   const growth = dash
     ? dash.growth_curve.map((p) => ({ ts: fmtTs(p.ts), pq: Math.round(p.pq * 100) }))
     : SAMPLE_GROWTH;
-  const readiness = dash ? dash.readiness : SAMPLE_READINESS;
+  // 板块掌握度：有真实孪生时取 board_mastery，否则回退示例
+  const boardMastery: Record<string, number> = dash
+    ? dash.board_mastery
+    : {
+        力学: 0.76,
+        电磁学: 0.64,
+        热学: 0.61,
+        光学: 0.57,
+        近代物理: 0.49,
+        高等数学: 0.5,
+        矢量分析: 0.45,
+        线性代数: 0.5,
+        理论力学: 0.4,
+        电动力学: 0.4,
+      };
   // 诊断分层：有真实孪生时由九维推导，否则回退示例数据
   const pcdf: PcdfLayer[] = dash ? derivePcdfLayers(dash.twin) : [];
 
@@ -163,33 +181,25 @@ const OverviewView: React.FC<OverviewViewProps> = ({ studentId, refreshKey }) =>
 
         <Card>
           <CardHeader>
-            <CardTitle>备赛就绪度</CardTitle>
+            <CardTitle>板块掌握度</CardTitle>
           </CardHeader>
-          <CardContent>
-            <ReadinessGauge data={readiness} />
-            <div className="mt-2 space-y-1 text-[11px] text-muted-foreground">
-              <div className="flex justify-between">
-                <span>省一概率</span>
-                <span className="font-medium text-foreground">
-                  {Math.round(readiness.province_top * 100)}%
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span>省队概率</span>
-                <span className="font-medium text-foreground">
-                  {Math.round(readiness.province_team * 100)}%
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span>IPhO 概率</span>
-                <span className="font-medium text-foreground">
-                  {Math.round(readiness.ipho * 100)}%
-                </span>
-              </div>
-              <p className="pt-1 text-[10px] leading-relaxed">
-                就绪度由九维数字孪生加权推导（省一 / 省队 / IPhO 三档概率），与能力画像实时挂钩。
+          <CardContent className="space-y-2">
+            {Object.entries(boardMastery)
+              .sort((a, b) => b[1] - a[1])
+              .map(([name, v]) => (
+                <div key={name} className="space-y-1">
+                  <div className="flex items-center justify-between text-[11px]">
+                    <span className="text-muted-foreground">{name}</span>
+                    <span className="font-medium text-foreground">{Math.round(v * 100)}</span>
+                  </div>
+                  <Progress value={Math.round(v * 100)} color={colorFor(v * 100)} />
+                </div>
+              ))}
+            {!dash && (
+              <p className="pt-1 text-[10px] leading-relaxed text-muted-foreground">
+                当前为示例数据；接入画像后显示真实板块掌握度。
               </p>
-            </div>
+            )}
           </CardContent>
         </Card>
       </div>

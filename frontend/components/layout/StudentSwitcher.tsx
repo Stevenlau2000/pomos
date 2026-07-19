@@ -3,7 +3,7 @@
 "use client";
 
 import * as React from "react";
-import { User, ChevronDown, Plus, Trash2, Check } from "lucide-react";
+import { User, ChevronDown, Plus, Trash2, Check, BookOpen } from "lucide-react";
 import { getStudents, deleteStudent, type Student } from "@/lib/api";
 
 interface StudentSwitcherProps {
@@ -12,6 +12,7 @@ interface StudentSwitcherProps {
   onSelect: (id: string) => void;
   onCreate: (name: string, grade: string) => void;
   onDelete: (id: string) => void;
+  onOpenKb?: () => void;
 }
 
 export default function StudentSwitcher({
@@ -20,6 +21,7 @@ export default function StudentSwitcher({
   onSelect,
   onCreate,
   onDelete,
+  onOpenKb,
 }: StudentSwitcherProps) {
   const [open, setOpen] = React.useState(false);
   const [students, setStudents] = React.useState<Student[]>([]);
@@ -72,7 +74,7 @@ export default function StudentSwitcher({
   };
 
   return (
-    <div className="relative" ref={ref}>
+    <div className="relative flex items-center gap-1.5" ref={ref}>
       <button
         onClick={() => setOpen((v) => !v)}
         className="flex items-center gap-2 rounded-md px-1.5 py-1 transition-colors hover:bg-accent"
@@ -86,6 +88,16 @@ export default function StudentSwitcher({
         </div>
         <ChevronDown className="h-4 w-4 text-muted-foreground" />
       </button>
+      {onOpenKb && (
+        <button
+          onClick={onOpenKb}
+          aria-label="个人知识库"
+          title="个人知识库"
+          className="flex h-9 w-9 items-center justify-center rounded-full border border-border text-muted-foreground transition-colors hover:border-brand hover:text-brand"
+        >
+          <BookOpen className="h-4 w-4" />
+        </button>
+      )}
 
       {open && (
         <div className="absolute left-0 top-full z-50 mt-2 w-64 rounded-md border border-border bg-card shadow-xl">

@@ -6,6 +6,7 @@ import * as React from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import Progress from "@/components/ui/progress";
+import TwinRadar, { type RadarDim } from "@/components/dashboard/TwinRadar";
 import { NINE_DIMS } from "@/lib/pomosData";
 import { useDashboard } from "@/lib/useDashboard";
 import { useI18n } from "@/lib/i18n";
@@ -40,6 +41,15 @@ const TwinView: React.FC<TwinViewProps> = ({ studentId, refreshKey }) => {
       }))
     : NINE_DIMS.map((d) => ({ label: d.label, value: d.value, hint: d.hint }));
 
+  // 雷达用维度（含 key），与卡片共用同一份孪生数据
+  const radarDims: RadarDim[] = dash
+    ? dash.twin.map((d) => ({
+        key: d.key,
+        label: d.label,
+        value: Math.round(d.value * 100),
+      }))
+    : NINE_DIMS.map((d) => ({ key: d.key, label: d.label, value: d.value }));
+
   const sorted = [...dims].sort((a, b) => b.value - a.value);
   const strongest = sorted[0];
   const weakest = sorted[sorted.length - 1];
@@ -58,6 +68,15 @@ const TwinView: React.FC<TwinViewProps> = ({ studentId, refreshKey }) => {
           {dash ? "" : " · 示例数据"} · 最强「{strongest.label}」· 最弱「{weakest.label}」
         </p>
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm">数字孪生雷达（{radarDims.length} 维）</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <TwinRadar twin={radarDims} />
+        </CardContent>
+      </Card>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {dims.map((d) => (

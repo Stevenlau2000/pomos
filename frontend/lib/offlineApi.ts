@@ -1,12 +1,13 @@
 // lib/offlineApi.ts
 // 离线模式实现：当后端不可达（如 GitHub Pages 静态托管）时，所有 API 调用路由到此模块。
 //
-// 设计：
-// - 学生 / 错题 / 对话历史 / 设置 全部持久化在浏览器 localStorage。
-// - 对话走内置「物理教练」启发式（移植自后端 llm.py 的 offline_tutor 知识库），
-//   并按标点分块模拟打字机式流式输出。
-// - 仪表盘 / 评估 / 训练计划 由确定性生成器基于学生标识产生稳定 mock 数据，
-//   保证测试人员看到完整、合理的图表与画像。
+// 本次增强改动：
+// 1) 学生 / 错题 / 对话 / 设置 全部经 studentStore 读写 IndexedDB（按 student_id 隔离），
+//    不再散落 localStorage 拼接 key（架构 §7）。
+// 2) 对话走内置「物理教练」启发式，按标点分块模拟打字机式流式输出。
+// 3) 新增「生成讲义：xxx」意图：经 lecture 生成四模块 Markdown（联网 LLM / 降级本地）。
+// 4) 设置保存：LLM 密钥以 AES-GCM 加密存 IndexedDB，绝不存明文 localStorage。
+// 5) 测试连接：真实探测云端 LLM 可用性。
 //
 // 所有导出函数签名与 lib/api.ts 完全一致，api.ts 据 MODE 自动路由。
 
@@ -22,7 +23,6 @@ import type {
   ModuleTrace,
   NineDim,
   PqRadar,
-  Readiness,
   SendChatRequest,
   SendChatResponse,
   SettingsResponse,
@@ -42,16 +42,16 @@ import {
   type Board,
   type BugCategory,
 } from "./physicsKB";
+import {
+  seedTwin,
+  type TwinDimension,
+} from "./twinSchema";
+import * as SS from "./studentStore";
+import * as Lecture from "./lecture";
+import { getLlmConfig } from "./llm";
 
-// 九维正典定义统一从 pomosData.ts 引入（与后端对齐、UI 文案源），避免离线副本 label 不一致。
-import { NINE_DIMS } from "./pomosData";
-
-// ---------------------------------------------------------------- 存储工具
+// ---------------------------------------------------------------- 存储工具（仅 lang 允许走 localStorage）
 const KEYS = {
-  students: "pomos_offline_students",
-  mistakes: (id: string) => `pomos_offline_mistakes_${id}`,
-  history: (id: string) => `pomos_offline_history_${id}`,
-  settings: "pomos_offline_settings",
   lang: "pomos_lang",
 };
 
@@ -105,63 +105,107 @@ function sample<T>(arr: T[], n: number, rng: () => number): T[] {
   return out;
 }
 
-// ---------------------------------------------------------------- 按学生持久化的数字孪生 / 训练状态
-const KEYS_TWIN = (id: string) => `pomos_offline_twin_${id}`;
-const KEYS_TRAIN = (id: string) => `pomos_offline_training_${id}`;
-const KEYS_DAILY = (id: string) => `pomos_offline_dailyplan_${id}`;
-
-/** 新建学生的九维基线：处于竞赛备考起步阶段，非全 0、非随机噪声。 */
-function baselineTwin(id: string, name: string): NineDim[] {
-  const base: Record<string, number> = {
-    concept: 0.55,
-    modeling: 0.5,
-    reasoning: 0.55,
-    calculation: 0.6,
-    experiment: 0.5,
-    transfer: 0.4,
-    meta: 0.5,
-    competition: 0.35,
-    growth: 0.5,
-  };
-  const rng = makeRng(hashStr(`${name || id}`));
-  return NINE_DIMS.map((d) => ({
-    key: d.key,
-    label: d.label,
-    value: Number(clamp(base[d.key] + (rng() - 0.5) * 0.12, 0.2, 0.92).toFixed(3)),
-    hint: d.hint,
-  }));
+function twinToMap(twin: Array<{ key: string; value: number }>): Record<string, number> {
+  const m: Record<string, number> = {};
+  for (const d of twin) m[d.key] = d.value;
+  return m;
 }
 
-function getStoredTwin(id: string): NineDim[] | null {
-  const raw = lsGet(KEYS_TWIN(id));
-  if (!raw) return null;
-  try {
-    return JSON.parse(raw) as NineDim[];
-  } catch {
-    return null;
+// 技术债 ⑤ 收尾：显式导出，便于单测直接构造 Record<string,number> 验证映射。
+export function pqFromTwin(twin: Record<string, number>): number {
+  const vals: number[] = [];
+  for (const d of NINE_DIM_KEYS) {
+    const v = Number(twin[d] ?? 0);
+    vals.push(Number.isNaN(v) ? 0 : v);
   }
-}
-function setStoredTwin(id: string, twin: NineDim[]): void {
-  lsSet(KEYS_TWIN(id), JSON.stringify(twin));
+  const mean = vals.reduce((a, b) => a + b, 0) / (vals.length || 1);
+  return clamp(0.2 + 0.8 * mean, 0, 0.99);
 }
 
-/** 完成某板块训练后回写的能力增量（九维 key → 增量 0~1） */
-export function masteryDeltaForBoard(board: Board): Record<string, number> {
-  const map: Record<Board, string[]> = {
-    力学: ["modeling", "reasoning", "calculation", "concept"],
-    电磁学: ["modeling", "calculation", "reasoning", "transfer"],
-    热学: ["concept", "calculation", "reasoning"],
-    光学: ["concept", "modeling", "reasoning"],
-    近代物理: ["concept", "reasoning", "calculation", "competition"],
+// 九维（认知）key 集合：用于 PQ 推导（学科维不纳入 PQ，保持语义纯净）。
+const NINE_DIM_KEYS = [
+  "concept",
+  "modeling",
+  "reasoning",
+  "calculation",
+  "experiment",
+  "transfer",
+  "meta",
+  "competition",
+  "growth",
+];
+
+const WEAK_POOL = [
+  "转动参考系下的惯性力处理",
+  "非静电力做功的符号约定",
+  "波动叠加的相位差分析",
+  "相对论同时性的相对性",
+  "热力学过程的方向判断",
+  "量纲分析与标度律",
+  "复杂电路的等效化简",
+  "变质量系统的动量方程",
+];
+const REC_POOL = [
+  "用能量法重做一遍本周力学题，对比牛顿法",
+  "补一组刚体定轴转动的专题训练（3 道）",
+  "整理电磁感应中「阻碍」的三种典型情形",
+  "用图像法复盘一道热力学循环题",
+  "每天 15 分钟口述一道题的物理图像",
+  "针对薄弱板块做错题归因，标注 bug 类型",
+];
+
+interface MockData {
+  pq: number;
+  radar: PqRadar;
+  growth_curve: GrowthPoint[];
+  twin: TwinDimension[];
+  weak_concepts: string[];
+  recommendations: string[];
+  board_mastery: Record<string, number>;
+}
+
+/** 由九维孪生推导完整的仪表盘数据（板块掌握度 / 雷达均自洽）。 */
+export function buildMockFromTwin(id: string, twin: TwinDimension[]): MockData {
+  const tq = (k: string) => twin.find((d) => d.key === k)?.value ?? 0.5;
+  const pq = pqFromTwin(twinToMap(twin));
+  const radar: PqRadar = {
+    knowledge: tq("concept"),
+    modeling: tq("modeling"),
+    scientific_thinking: tq("reasoning"),
+    transfer: tq("transfer"),
+    competition: tq("competition"),
+    growth: tq("growth"),
   };
-  const out: Record<string, number> = {};
-  for (const k of map[board]) out[k] = 0.03;
-  out.competition = (out.competition ?? 0) + 0.02;
-  out.growth = 0.03;
-  return out;
+  const rng = makeRng(hashStr(id || "guest") + 3);
+  const growth_curve: GrowthPoint[] = [];
+  let p = pq * 0.7;
+  const now = Date.now();
+  for (let i = 0; i < 10; i++) {
+    p = clamp(p + (rng() - 0.35) * 0.07);
+    growth_curve.push({
+      ts: new Date(now - (10 - i) * 7 * 86400000).toISOString().slice(0, 10),
+      pq: Number(p.toFixed(3)),
+    });
+  }
+  growth_curve[growth_curve.length - 1] = {
+    ts: growth_curve[growth_curve.length - 1].ts,
+    pq,
+  };
+  const board_mastery = Gen.computeBoardMastery(twin);
+  const weak = [...twin].sort((a, b) => a.value - b.value).slice(0, 3).map((d) => d.label);
+  const recs = sample(REC_POOL, 3, rng);
+  return {
+    pq,
+    radar,
+    growth_curve,
+    twin,
+    weak_concepts: weak,
+    recommendations: recs,
+    board_mastery,
+  };
 }
 
-// ---------------------------------------------------------------- 物理知识库（移植自后端）
+// ---------------------------------------------------------------- 物理知识库（离线教练）
 interface Topic {
   keys: string[];
   zh: string;
@@ -181,7 +225,7 @@ const OFFLINE_KB: Topic[] = [
   { keys: ["热力学", "熵", "第一定律", "第二定律", "thermal", "热机"], zh: "第一定律 ΔU=Q−W。\n• 理想气体 pV=nRT；绝热 pV^γ=const。\n• 卡诺效率 η=1−T_c/T_h。\n先问：W 是系统对外还是外界对系统？", q: "可逆卡诺循环四步各是什么？实际热机效率为何必低于卡诺？" },
   { keys: ["量子", "quantum", "薛定谔", "波函数", "势阱", "不确定性", "schrödinger"], zh: "量子态由 ψ 描述，概率密度 |ψ|²；演化 iℏ∂ψ/∂t=Ĥψ。\n• 无限深势阱 Eₙ=n²π²ℏ²/(2mL²)；不确定性 Δx·Δp≥ℏ/2。\n先问：边界条件如何决定能级量子化？", q: "势垒穿透（隧穿）为何违背经典直觉却符合能量守恒？" },
   { keys: ["静电", "电场", "高斯", "电容", "gauss", "coulomb", "电势"], zh: "库仑 F=kq₁q₂/r²；电场 E=F/q；高斯定理 ∮E·dA=Q_enc/ε₀。\n• 电势 V：E=−∇V；平行板 C=ε₀S/d。\n先问：对称性是否允许用高斯定理一步求 E？", q: "导体静电平衡时内部场强为何为零？表面电荷如何分布？" },
-  { keys: ["流体", "伯努利", "fluids", "压强", "浮力", "bernoulli"], zh: "静力学 p=ρgh；阿基米德浮力=排开液重。\n• 伯努利 p+½ρv²+ρgh=const 沿流线守恒；连续性 S₁v₁=S₂v₂。\n先问：流动是否理想、定常、不可压缩？", q: "飞机升力能否仅靠‘流速大压强小’解释？环量起什么作用？" },
+  { keys: ["流体", "伯努利", "fluids", "压强", "浮力", "bernoulli"], zh: "静力学 p=ρgh；阿基米德浮力=排开液重。\n• 伯努利 p+½ρv²+ρgh=const 沿流线守恒；连续性 S₁v₁=S₂v₂。\n先问：流动是否理想、定常、不可压缩？", q: "飞机升力能否仅靠「流速大压强小」解释？环量起什么作用？" },
 ];
 
 function matchTopic(message: string): Topic | null {
@@ -261,8 +305,8 @@ function fmtTraining(t: Gen.GeneratedTraining): string {
   return lines.join("\n");
 }
 
-/** 若消息是生成意图（讲解已生成题 / 出题 / 训练计划），返回导师生成内容；否则返回 null 走常规辅导。 */
-function mentorGenerate(message: string, studentId: string): string | null {
+/** 若消息是生成意图（讲解已生成题 / 出题 / 训练计划 / 生成讲义），返回导师生成内容；否则返回 null 走常规辅导。 */
+async function mentorGenerate(message: string, studentId: string): Promise<string | null> {
   const text = message || "";
   // 讲解已生成的题目（页面会把题干与参考答案要点一并带来）
   if (/讲解这道题/.test(text) && /参考答案要点/.test(text)) {
@@ -284,6 +328,13 @@ function mentorGenerate(message: string, studentId: string): string | null {
       "建议你先独立写出完整过程再对照要点自检；卡住时告诉我具体哪一步。",
     ].join("\n");
   }
+  // 生成讲义：「生成讲义：xxx」或「生成讲义：xxx」
+  const lecMatch = text.match(/生成讲义[:：]\s*([^\n]+)/);
+  if (lecMatch) {
+    const topic = lecMatch[1].trim();
+    const r = await Lecture.generateLecture(topic, { studentId, knowledgePoint: topic });
+    return Lecture.toMarkdown(r);
+  }
   const isTrain = /训练计划|针对性训练|生成训练|训练方案|训练建议/.test(text);
   const isQuestion = /出题|生成题目|给我一道|来道题|练一道|一道题|考题|押一道/.test(text);
   if (!isTrain && !isQuestion) return null;
@@ -293,7 +344,7 @@ function mentorGenerate(message: string, studentId: string): string | null {
   const node = nodeMatch ? nodeMatch[1] : board ? `${board}核心` : "核心考点";
 
   if (isTrain) {
-    const bm = Gen.computeBoardMastery(getTwin(studentId));
+    const bm = Gen.computeBoardMastery(await getTwin(studentId));
     const mastery = board ? (bm[board] ?? 60) : 60;
     const t = Gen.generateTrainingForNode(node, board ?? "力学", mastery);
     return fmtTraining(t);
@@ -331,91 +382,17 @@ function buildTrace(message: string): ModuleTrace[] {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-// ---------------------------------------------------------------- 学生存储
-function ensureStudents(): Student[] {
-  const raw = lsGet(KEYS.students);
-  if (raw) {
-    try {
-      return JSON.parse(raw) as Student[];
-    } catch {
-      /* fallthrough */
-    }
-  }
-  // 用当前本地会话（page.tsx 管理的 studentId / student）播种一个默认学生
-  const id = lsGet("pomos_student_id") || "local-guest";
-  let name = "小宇";
-  let grade = "高二 · 物理竞赛";
-  const sp = lsGet("pomos_student");
-  if (sp) {
-    try {
-      const p = JSON.parse(sp);
-      name = p.name || name;
-      grade = p.grade || grade;
-    } catch {
-      /* ignore */
-    }
-  }
-  const seed: Student[] = [
-    { student_id: id, name, grade, created_at: new Date().toISOString(), pq: mockPq(id) },
-  ];
-  lsSet(KEYS.students, JSON.stringify(seed));
-  return seed;
-}
-
-function saveStudents(list: Student[]): void {
-  lsSet(KEYS.students, JSON.stringify(list));
-}
-
-function findStudent(id: string): Student | undefined {
-  return ensureStudents().find((s) => s.student_id === id);
-}
-
-function mockPq(id: string): number {
-  const rng = makeRng(hashStr(id || "guest"));
-  const twin: Record<string, number> = {};
-  for (const d of NINE_DIMS) {
-    twin[d.key] = Number((0.3 + rng() * 0.65).toFixed(3));
-  }
-  return pqFromTwin(twin);
-}
-
-function bumpPq(id: string, pq: number): void {
-  const list = ensureStudents();
+// ---------------------------------------------------------------- 学生存储（经 studentStore）
+async function bumpPq(id: string, pq: number): Promise<void> {
+  const list = await SS.loadStudents();
   const s = list.find((x) => x.student_id === id);
   if (s) {
     s.pq = Number(pq.toFixed(3));
-    saveStudents(list);
+    await SS.upsertStudent(s);
   }
 }
 
-// ---------------------------------------------------------------- 对话历史
-function getHistory(id: string): HistoryMessage[] {
-  const raw = lsGet(KEYS.history(id));
-  if (!raw) return [];
-  try {
-    return JSON.parse(raw) as HistoryMessage[];
-  } catch {
-    return [];
-  }
-}
-function setHistory(id: string, msgs: HistoryMessage[]): void {
-  lsSet(KEYS.history(id), JSON.stringify(msgs.slice(-200)));
-}
-
-// ---------------------------------------------------------------- 错题
-function getMistakesStore(id: string): Mistake[] {
-  const raw = lsGet(KEYS.mistakes(id));
-  if (!raw) return [];
-  try {
-    return JSON.parse(raw) as Mistake[];
-  } catch {
-    return [];
-  }
-}
-function setMistakesStore(id: string, list: Mistake[]): void {
-  lsSet(KEYS.mistakes(id), JSON.stringify(list));
-}
-
+// ---------------------------------------------------------------- 错题（经 studentStore）
 function fileToDataURL(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const r = new FileReader();
@@ -425,163 +402,14 @@ function fileToDataURL(file: File): Promise<string> {
   });
 }
 
-// ---------------------------------------------------------------- 设置
-function getSettingsStore(): SettingsResponse {
-  const raw = lsGet(KEYS.settings);
-  const base: SettingsResponse = {
-    llm_provider: "",
-    llm_base_url: "",
-    llm_model: "",
-    llm_temperature: 0.7,
-    llm_max_tokens: 1200,
-    coach_language: "zh",
-    cors_origins: "",
-  };
-  if (!raw) return base;
-  try {
-    return { ...base, ...(JSON.parse(raw) as SettingsResponse) };
-  } catch {
-    return base;
-  }
-}
-
 // ---------------------------------------------------------------- 确定性 mock 数据
-
-// ---------------------------------------------------------------- PQ 单源推导（技术债 ⑤）
-// 所有生成 PQ 的入口统一经 pqFromTwin，确保顶栏 PQ 与 getDashboard 重算值同源、无随机抖动。
-// 技术债 ⑤ 收尾（QA 建议）：显式导出，便于单测直接构造 Record<string,number> 验证映射。
-export function twinToMap(twin: Array<{ key: string; value: number }>): Record<string, number> {
-  const m: Record<string, number> = {};
-  for (const dim of twin) m[dim.key] = dim.value;
-  return m;
+// 技术债 ⑤ 收尾：显式导出，便于单测直接构造 NineDim[] 验证推导自洽性。
+export async function getTwin(studentId: string): Promise<NineDim[]> {
+  const twin = await SS.loadTwin(studentId);
+  return twin as unknown as NineDim[];
 }
 
-// 技术债 ⑤ 收尾（QA 建议）：显式导出，便于单元测试直接覆盖边界（空 twin / NaN twin 不抛异常）。
-// 数值健壮性加固：对每维显式 Number() 并归零 NaN（空对象 / 含 NaN 会污染均值，必须归零）。
-export function pqFromTwin(twin: Record<string, number>): number {
-  const vals: number[] = [];
-  for (const d of NINE_DIMS) {
-    const v = Number(twin[d.key] ?? 0);
-    vals.push(Number.isNaN(v) ? 0 : v);
-  }
-  const mean = vals.reduce((a, b) => a + b, 0) / (vals.length || 1);
-  return clamp(0.2 + 0.8 * mean, 0, 0.99);
-}
-const WEAK_POOL = [
-  "转动参考系下的惯性力处理",
-  "非静电力做功的符号约定",
-  "波动叠加的相位差分析",
-  "相对论同时性的相对性",
-  "热力学过程的方向判断",
-  "量纲分析与标度律",
-  "复杂电路的等效化简",
-  "变质量系统的动量方程",
-];
-const REC_POOL = [
-  "用能量法重做一遍本周力学题，对比牛顿法",
-  "补一组刚体定轴转动的专题训练（3 道）",
-  "整理电磁感应中‘阻碍’的三种典型情形",
-  "用图像法复盘一道热力学循环题",
-  "每天 15 分钟口述一道题的物理图像",
-  "针对薄弱板块做错题归因，标注 bug 类型",
-];
-
-interface MockData {
-  pq: number;
-  radar: PqRadar;
-  growth_curve: GrowthPoint[];
-  readiness: Readiness;
-  twin: NineDim[];
-  weak_concepts: string[];
-  recommendations: string[];
-  board_mastery: Record<string, number>;
-}
-const mockCache = new Map<string, MockData>();
-
-/** 由九维孪生推导完整的仪表盘数据（就绪度 / 板块掌握度 / 雷达均自洽）。 */
-// 技术债 ⑤ 收尾（QA 建议）：显式导出，便于单测直接构造 NineDim[] 验证推导自洽性。
-export function buildMockFromTwin(id: string, twin: NineDim[]): MockData {
-  const tq = (k: string) => twin.find((d) => d.key === k)?.value ?? 0.5;
-  const pq = pqFromTwin(twinToMap(twin));
-  const radar: PqRadar = {
-    knowledge: tq("concept"),
-    modeling: tq("modeling"),
-    scientific_thinking: tq("reasoning"),
-    transfer: tq("transfer"),
-    competition: tq("competition"),
-    growth: tq("growth"),
-  };
-  const rng = makeRng(hashStr(id || "guest") + 3);
-  const growth_curve: GrowthPoint[] = [];
-  let p = pq * 0.7;
-  const now = Date.now();
-  for (let i = 0; i < 10; i++) {
-    p = clamp(p + (rng() - 0.35) * 0.07);
-    growth_curve.push({
-      ts: new Date(now - (10 - i) * 7 * 86400000).toISOString().slice(0, 10),
-      pq: Number(p.toFixed(3)),
-    });
-  }
-  growth_curve[growth_curve.length - 1] = {
-    ts: growth_curve[growth_curve.length - 1].ts,
-    pq,
-  };
-  const readiness = Gen.computeReadiness(twin);
-  const board_mastery = Gen.computeBoardMastery(twin);
-  const weak = [...twin].sort((a, b) => a.value - b.value).slice(0, 3).map((d) => d.label);
-  const recs = sample(REC_POOL, 3, rng);
-  return {
-    pq,
-    radar,
-    growth_curve,
-    readiness,
-    twin,
-    weak_concepts: weak,
-    recommendations: recs,
-    board_mastery,
-  };
-}
-
-function mockDashboard(id: string): MockData {
-  // 若已存在持久化孪生（新学生初始化 / 训练回写），实时推导以反映最新状态
-  const stored = getStoredTwin(id);
-  if (stored) return buildMockFromTwin(id, stored);
-  const cached = mockCache.get(id);
-  if (cached) return cached;
-  const rng = makeRng(hashStr(id || "guest"));
-  const twin: NineDim[] = NINE_DIMS.map((d) => ({
-    key: d.key,
-    label: d.label,
-    value: Number((0.3 + rng() * 0.65).toFixed(3)),
-    hint: d.hint,
-  }));
-  const data = buildMockFromTwin(id, twin);
-  mockCache.set(id, data);
-  return data;
-}
-
-function mockTraining(id: string): TrainingPlan {
-  const rng = makeRng(hashStr(id || "guest") + 7);
-  const focuses = ["力学建模", "电磁综合", "热学循环", "波动光学", "近代物理", "竞赛策略"];
-  const weekly = Array.from({ length: 4 }, (_, w) => ({
-    week: w + 1,
-    focus: focuses[Math.floor(rng() * focuses.length)],
-    items: sample(REC_POOL, 3, rng),
-    load: 4 + Math.floor(rng() * 6),
-  }));
-  const today: DailyPlan[] = [
-    { time: "19:00", task: "专题训练：转动参考系", type: "练习", priority: 1 },
-    { time: "20:00", task: "复盘今日错题，标注 bug 类型", type: "反思", priority: 2 },
-    { time: "20:40", task: "口述一道题的物理图像（15 min）", type: "输出", priority: 3 },
-  ];
-  return {
-    weekly,
-    today,
-    rationale: "基于离线评估画像生成：优先补齐薄弱板块，保持每日输出以固化直觉。",
-  };
-}
-
-// ================================================================ 导出 API（与 api.ts 同签名）
+// ---------------------------------------------------------------- 导出 API（与 api.ts 同签名）
 export function getHealth(): Promise<HealthResponse> {
   return Promise.resolve({
     status: "ok",
@@ -594,12 +422,11 @@ export function getHealth(): Promise<HealthResponse> {
   });
 }
 
-export function createStudent(input: CreateStudentRequest): Promise<Student> {
-  const list = ensureStudents();
+export async function createStudent(input: CreateStudentRequest): Promise<Student> {
+  const list = await SS.loadStudents();
   const id = `stu_${Math.random().toString(36).slice(2, 10)}`;
-  // 初始化数字孪生基线并持久化：新建学生立即拥有有意义的能力雷达
-  const twin = baselineTwin(id, input.name);
-  setStoredTwin(id, twin);
+  const twin = seedTwin(id, input.name);
+  await SS.saveTwin(id, twin);
   const stu: Student = {
     student_id: id,
     name: input.name,
@@ -607,43 +434,40 @@ export function createStudent(input: CreateStudentRequest): Promise<Student> {
     created_at: new Date().toISOString(),
     pq: pqFromTwin(twinToMap(twin)),
   };
-  list.push(stu);
-  saveStudents(list);
-  return Promise.resolve(stu);
+  await SS.upsertStudent(stu);
+  return stu;
 }
 
-export function getStudents(): Promise<Student[]> {
-  return Promise.resolve(ensureStudents());
+export async function getStudents(): Promise<Student[]> {
+  return SS.loadStudents();
 }
 
-export function deleteStudent(studentId: string): Promise<{ ok: boolean }> {
-  const list = ensureStudents().filter((s) => s.student_id !== studentId);
-  saveStudents(list);
-  lsSet(KEYS.mistakes(studentId), "[]");
-  lsSet(KEYS.history(studentId), "[]");
-  return Promise.resolve({ ok: true });
+export async function deleteStudent(studentId: string): Promise<{ ok: boolean }> {
+  await SS.deleteStudentData(studentId);
+  return { ok: true };
 }
 
-export function updateStudent(
+export async function updateStudent(
   studentId: string,
   data: { name?: string; grade?: string },
 ): Promise<Student> {
-  const list = ensureStudents();
+  const list = await SS.loadStudents();
   const s = list.find((x) => x.student_id === studentId);
   if (!s) return Promise.reject(new Error("学生不存在（离线）"));
   if (data.name !== undefined) s.name = data.name;
   if (data.grade !== undefined) s.grade = data.grade;
-  saveStudents(list);
-  return Promise.resolve(s);
+  await SS.upsertStudent(s);
+  return s;
 }
 
-export function sendChat(input: SendChatRequest): Promise<SendChatResponse> {
-  const text = mentorGenerate(input.message, input.student_id) ?? offlineTutor(input.message, getCoachLang());
+export async function sendChat(input: SendChatRequest): Promise<SendChatResponse> {
+  const text = (await mentorGenerate(input.message, input.student_id)) ?? offlineTutor(input.message, getCoachLang());
+  const upd = await buildStudentUpdate(input.student_id);
   return Promise.resolve({
     session_id: `off_${Date.now()}`,
     reply: text,
     module_trace: buildTrace(input.message),
-    student_update: buildStudentUpdate(input.student_id),
+    student_update: upd,
   });
 }
 
@@ -653,7 +477,7 @@ export async function streamChat(
   signal?: AbortSignal,
 ): Promise<void> {
   const lang = getCoachLang();
-  const full = mentorGenerate(input.message, input.student_id) ?? offlineTutor(input.message, lang);
+  const full = (await mentorGenerate(input.message, input.student_id)) ?? offlineTutor(input.message, lang);
   const chunks = chunkText(full);
   for (const c of chunks) {
     if (signal?.aborted) {
@@ -669,45 +493,45 @@ export async function streamChat(
     module_trace: trace,
     intent: "offline",
   });
-  const upd = buildStudentUpdate(input.student_id);
+  const upd = await buildStudentUpdate(input.student_id);
   handlers.onAssessment?.(upd);
 
-  const hist = getHistory(input.student_id);
+  const hist = await SS.loadHistory(input.student_id);
   hist.push({ role: "user", content: input.message, created_at: new Date().toISOString() });
   hist.push({ role: "assistant", content: full, created_at: new Date().toISOString() });
-  setHistory(input.student_id, hist);
-  bumpPq(input.student_id, upd.pq);
+  await SS.saveHistory(input.student_id, hist);
+  await bumpPq(input.student_id, upd.pq);
 
   handlers.onDone?.({ session_id: `off_${Date.now()}` });
 }
 
-export function getDashboard(studentId: string): Promise<Dashboard> {
-  const d = mockDashboard(studentId);
-  const s = findStudent(studentId);
-  return Promise.resolve({
+export async function getDashboard(studentId: string): Promise<Dashboard> {
+  const twin = await SS.loadTwin(studentId);
+  const d = buildMockFromTwin(studentId, twin);
+  const s = (await SS.loadStudents()).find((x) => x.student_id === studentId);
+  return {
     student_id: studentId,
     name: s?.name || "学员",
     grade: s?.grade,
     pq: d.pq,
     radar: d.radar,
     growth_curve: d.growth_curve,
-    readiness: d.readiness,
-    twin: d.twin,
+    twin: d.twin as unknown as NineDim[],
     weak_concepts: d.weak_concepts,
     recommendations: d.recommendations,
     board_mastery: d.board_mastery,
-  });
+  };
 }
 
-export function getTraining(studentId: string): Promise<TrainingPlan> {
-  // 个性化：依据数字孪生九维画像生成 4 周计划 + 今日规划（聚焦最弱板块）
-  const d = mockDashboard(studentId);
+export async function getTraining(studentId: string): Promise<TrainingPlan> {
+  const twin = await SS.loadTwin(studentId);
+  const d = buildMockFromTwin(studentId, twin);
   const gen = Gen.generateWeeklyTraining(d.twin, d.weak_concepts, []);
-  return Promise.resolve({
+  return {
     weekly: gen.weekly,
     today: gen.today,
     rationale: gen.rationale,
-  });
+  };
 }
 
 // ---------------------------------------------------------------- 生成 / 反馈（供视图直接调用）
@@ -737,11 +561,11 @@ export function generateMistakeAnalysis(
 }
 
 /** 完成某板块训练后回写九维增量并 bump PQ，返回最新评估。 */
-export function applyMasteryDelta(
+export async function applyMasteryDelta(
   studentId: string,
   delta: Record<string, number>,
-): StudentUpdate {
-  const twin = getStoredTwin(studentId) ?? baselineTwin(studentId, studentId);
+): Promise<StudentUpdate> {
+  const twin = await SS.loadTwin(studentId);
   let changed = false;
   for (const d of twin) {
     if (delta[d.key] != null) {
@@ -749,28 +573,21 @@ export function applyMasteryDelta(
       changed = true;
     }
   }
-  if (changed) setStoredTwin(studentId, twin);
-  const pq = pqFromTwin(twinToMap(twin));
-  const d = mockDashboard(studentId);
-  mockCache.delete(studentId);
+  if (changed) await SS.saveTwin(studentId, twin);
+  const d = buildMockFromTwin(studentId, twin);
   return {
-    pq,
+    pq: d.pq,
     mastery_delta: delta,
     weak_concepts: d.weak_concepts,
     recommendations: d.recommendations,
   };
 }
 
-export function getTwin(studentId: string): NineDim[] {
-  return getStoredTwin(studentId) ?? mockDashboard(studentId).twin;
+export async function getMistakes(studentId: string): Promise<Mistake[]> {
+  return SS.loadMistakes(studentId);
 }
 
-export function getMistakes(studentId: string): Promise<Mistake[]> {
-  return Promise.resolve(getMistakesStore(studentId));
-}
-
-export function createMistake(studentId: string, data: MistakeCreate): Promise<Mistake> {
-  const list = getMistakesStore(studentId);
+export async function createMistake(studentId: string, data: MistakeCreate): Promise<Mistake> {
   const m: Mistake = {
     id: `mis_${Math.random().toString(36).slice(2, 10)}`,
     topic: data.topic,
@@ -782,31 +599,29 @@ export function createMistake(studentId: string, data: MistakeCreate): Promise<M
     image_path: null,
     analysis: data.analysis ?? null,
   };
-  list.unshift(m);
-  setMistakesStore(studentId, list);
-  return Promise.resolve(m);
+  await SS.saveMistake(m);
+  return m;
 }
 
-export function updateMistake(
+export async function updateMistake(
   studentId: string,
   id: string,
   data: { status?: string; summary?: string; analysis?: string; bug_id?: string },
 ): Promise<Mistake> {
-  const list = getMistakesStore(studentId);
+  const list = await SS.loadMistakes(studentId);
   const m = list.find((x) => x.id === id);
   if (!m) return Promise.reject(new Error("错题不存在（离线）"));
   if (data.status !== undefined) m.status = data.status;
   if (data.summary !== undefined) m.summary = data.summary;
   if (data.analysis !== undefined) m.analysis = data.analysis;
   if (data.bug_id !== undefined) m.bug_id = data.bug_id;
-  setMistakesStore(studentId, list);
-  return Promise.resolve(m);
+  await SS.saveMistake(m);
+  return m;
 }
 
-export function deleteMistake(studentId: string, id: string): Promise<{ ok: boolean }> {
-  const list = getMistakesStore(studentId).filter((x) => x.id !== id);
-  setMistakesStore(studentId, list);
-  return Promise.resolve({ ok: true });
+export async function deleteMistake(studentId: string, id: string): Promise<{ ok: boolean }> {
+  await SS.deleteMistakeById(id);
+  return { ok: true };
 }
 
 export async function uploadMistakeImage(
@@ -815,45 +630,134 @@ export async function uploadMistakeImage(
   file: File,
 ): Promise<{ image_path: string }> {
   const dataUrl = await fileToDataURL(file);
-  const list = getMistakesStore(studentId);
+  const list = await SS.loadMistakes(studentId);
   const m = list.find((x) => x.id === mistakeId);
   if (m) {
     m.image_path = dataUrl;
-    setMistakesStore(studentId, list);
+    await SS.saveMistake(m);
   }
   return { image_path: dataUrl };
 }
 
-export function getChatHistory(studentId: string): Promise<{ messages: HistoryMessage[] }> {
-  return Promise.resolve({ messages: getHistory(studentId) });
+export async function getChatHistory(studentId: string): Promise<{ messages: HistoryMessage[] }> {
+  return { messages: await SS.loadHistory(studentId) };
 }
 
-export function testConnection(): Promise<TestConnectionResponse> {
-  return Promise.resolve({
-    ok: false,
-    detail:
-      "离线演示模式：未连接后端。如需真实 AI 辅导，请将后端部署到可访问地址，并设置 NEXT_PUBLIC_API_BASE 后重新部署。",
-    mock_mode: true,
-  });
+export async function testConnection(): Promise<TestConnectionResponse> {
+  const cfg = await getLlmConfig();
+  if (!cfg) {
+    return {
+      ok: false,
+      detail: "未配置 LLM 密钥（请在设置中填写，将回退本地生成）",
+      mock_mode: true,
+    };
+  }
+  try {
+    const res = await fetch(`${cfg.baseUrl.replace(/\/$/, "")}/chat/completions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${cfg.apiKey}`,
+      },
+      body: JSON.stringify({
+        model: cfg.model,
+        messages: [{ role: "user", content: "ping" }],
+        max_tokens: 5,
+        stream: false,
+      }),
+    });
+    if (!res.ok) {
+      return { ok: false, detail: `连接失败：HTTP ${res.status}`, mock_mode: false };
+    }
+    return { ok: true, detail: "连接成功，云端 LLM 可用。", mock_mode: false };
+  } catch (e) {
+    return {
+      ok: false,
+      detail: `连接失败：${String(e)}（将回退本地生成）`,
+      mock_mode: false,
+    };
+  }
 }
 
-export function getSettings(): Promise<SettingsResponse> {
-  return Promise.resolve(getSettingsStore());
+export async function getSettings(): Promise<SettingsResponse> {
+  const s = await SS.loadSettings();
+  return {
+    llm_provider: s.llm_provider,
+    llm_base_url: s.llm_base_url,
+    llm_model: s.llm_model,
+    llm_temperature: s.llm_temperature,
+    llm_max_tokens: s.llm_max_tokens,
+    coach_language: s.coach_language,
+    llm_api_key: "", // 不以明文返回（密钥仅在 IndexedDB 加密存储）
+  };
 }
 
-export function putSettings(data: Partial<SettingsResponse>): Promise<SettingsResponse> {
-  const merged = { ...getSettingsStore(), ...data };
-  lsSet(KEYS.settings, JSON.stringify(merged));
+const KEY_FIELDS = [
+  "openai_api_key",
+  "deepseek_api_key",
+  "dashscope_api_key",
+  "moonshot_api_key",
+  "zhipu_api_key",
+  "gemini_api_key",
+  "anthropic_api_key",
+  "llm_api_key",
+];
+
+export async function putSettings(data: Partial<SettingsResponse>): Promise<SettingsResponse> {
+  const patch: Partial<SS.SettingsRecord> = {};
+  if (data.llm_provider !== undefined) patch.llm_provider = data.llm_provider;
+  if (data.llm_base_url !== undefined) patch.llm_base_url = data.llm_base_url;
+  if (data.llm_model !== undefined) patch.llm_model = data.llm_model;
+  if (data.llm_temperature !== undefined) patch.llm_temperature = data.llm_temperature;
+  if (data.llm_max_tokens !== undefined) patch.llm_max_tokens = data.llm_max_tokens;
+  if (data.coach_language !== undefined) patch.coach_language = data.coach_language;
+
+  // 提取任意供应商密钥字段 → AES-GCM 加密存 IndexedDB
+  let keyToSave: string | undefined;
+  for (const k of KEY_FIELDS) {
+    const v = (data as Record<string, unknown>)[k];
+    if (typeof v === "string" && v.trim() && v.trim() !== "••••") {
+      keyToSave = v.trim();
+      break;
+    }
+  }
+  if (keyToSave) await SS.saveLlmKeyEncrypted(keyToSave);
+
+  await SS.saveSettings(patch);
   if (data.coach_language) lsSet(KEYS.lang, data.coach_language);
-  return Promise.resolve(merged);
+  return getSettings();
+}
+
+/** 生成四模块讲义（路由到 lecture，联网 LLM / 降级本地）。 */
+export async function generateLecture(
+  topic: string,
+  ctx: { studentId?: string; knowledgePoint?: string; board?: string },
+): Promise<Lecture.LectureResult> {
+  return Lecture.generateLecture(topic, ctx);
+}
+
+// ---------------------------------------------------------------- 训练回写（板块 → 九维增量）
+// 完成某板块训练后，返回应回写到九维（认知）孪生的正向增量。
+// 增量权重取自 offlineGen.BOARD_WEIGHT（单一数据源），按权重归一后乘总增益，
+// 保证每次训练对「板块相关维度」温和提升（0~1，单维 ≤ DELTA_GAIN），不会越过 1。
+const DELTA_GAIN = 0.02; // 完成一次板块训练对 PB 相关维度的总增量上限
+
+export function masteryDeltaForBoard(board: Board): Record<string, number> {
+  const w: Record<string, number> = (Gen.BOARD_WEIGHT as Record<Board, Record<string, number>>)[board] ?? {};
+  const wsum = Object.values(w).reduce((a, b) => a + b, 0) || 1;
+  const out: Record<string, number> = {};
+  for (const k of Object.keys(w)) {
+    out[k] = Number((DELTA_GAIN * (w[k] / wsum)).toFixed(4));
+  }
+  return out;
 }
 
 // ================================================================ 内部辅助（供 api.ts 调用）
-export function buildStudentUpdate(studentId: string): StudentUpdate {
-  const d = mockDashboard(studentId);
-  const pq = pqFromTwin(twinToMap(d.twin));
+export async function buildStudentUpdate(studentId: string): Promise<StudentUpdate> {
+  const twin = await SS.loadTwin(studentId);
+  const d = buildMockFromTwin(studentId, twin);
   return {
-    pq: Number(pq.toFixed(3)),
+    pq: Number(d.pq.toFixed(3)),
     mastery_delta: {},
     weak_concepts: d.weak_concepts,
     recommendations: d.recommendations,

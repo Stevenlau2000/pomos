@@ -114,8 +114,8 @@ export const DICT: Record<string, Entry> = {
   },
   "views.overview.title": { zh: "能力总览", en: "Capability Overview" },
   "views.overview.sub": {
-    zh: "HPCAS 物理商（PQ）· 六维能力 · 备赛就绪度",
-    en: "HPCAS Physics Quotient · 6-dim ability · readiness",
+    zh: "HPCAS 物理商（PQ）· 六维能力",
+    en: "HPCAS Physics Quotient · 6-dim ability",
   },
   "views.twin.title": { zh: "学生数字孪生", en: "Student Digital Twin" },
   "views.twin.sub": {

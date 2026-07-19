@@ -8,7 +8,57 @@
 
 import * as offline from "./offlineApi";
 import type { GeneratedQuestion, GeneratedTraining, MistakeAnalysis } from "./offlineGen";
+import type { LectureResult } from "./lecture";
 import type { Board, BugCategory } from "./physicsKB";
+
+/** 讲义生成上下文（与 lib/lecture.ts LectureContext 同构，供 UI 直接构造）。 */
+export interface LectureContext {
+  studentId?: string;
+  knowledgePoint?: string;
+  board?: string;
+}
+
+/** 四模块讲义结果（概念辨析 / 数理推导 / 图像分析 / 逻辑贯通）。 */
+export type { LectureResult } from "./lecture";
+
+/**
+ * 生成四模块讲义。离线模式下路由到 lecture 模块（云端 LLM / 降级本地启发式）；
+ * 在线模式后端未实装该端点，统一回退浏览器内生成，保证可用。
+ */
+export function generateLecture(
+  topic: string,
+  ctx: LectureContext = {},
+): Promise<LectureResult> {
+  return offline.generateLecture(topic, {
+    studentId: ctx.studentId,
+    knowledgePoint: ctx.knowledgePoint,
+    board: ctx.board,
+  });
+}
+
+/** 由供应商标识返回其密钥字段名（与 SettingsPanel 共用，避免两份映射漂移）。 */
+export function keyFieldFor(provider: string): keyof SettingsResponse {
+  switch (provider) {
+    case "openai":
+      return "openai_api_key";
+    case "deepseek":
+      return "deepseek_api_key";
+    case "qwen":
+      return "dashscope_api_key";
+    case "moonshot":
+      return "moonshot_api_key";
+    case "zhipu":
+      return "zhipu_api_key";
+    case "gemini":
+      return "gemini_api_key";
+    case "anthropic":
+      return "anthropic_api_key";
+    case "custom":
+      return "llm_api_key";
+    default:
+      return "llm_api_key";
+  }
+}
 
 export const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000";
 
@@ -117,13 +167,6 @@ export interface GrowthPoint {
   pq: number;
 }
 
-/** 备赛就绪度 */
-export interface Readiness {
-  province_top: number;
-  province_team: number;
-  ipho: number;
-}
-
 /** 九维画像单维（后端返回 0~1 归一化） */
 export interface NineDim {
   key: string;
@@ -140,7 +183,6 @@ export interface Dashboard {
   pq: number; // 0~1
   radar: PqRadar; // 0~1
   growth_curve: GrowthPoint[]; // pq 0~1
-  readiness: Readiness; // 0~1
   twin: NineDim[];
   weak_concepts: string[];
   recommendations: string[];
@@ -374,6 +416,13 @@ export function updateStudent(
 
 /** 对话历史单条 */
 export interface HistoryMessage {
+  role: "user" | "assistant";
+  content: string;
+  created_at: string;
+}
+
+/** 对话单条消息（与 HistoryMessage 同构，供 studentStore / 迁移层持久化使用）。 */
+export interface ChatMessage {
   role: "user" | "assistant";
   content: string;
   created_at: string;

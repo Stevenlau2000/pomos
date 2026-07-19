@@ -13,7 +13,26 @@ import {
   type ProblemTemplate,
   type BugCategory,
 } from "./physicsKB";
+import { findExampleByPoint, searchTextbooks } from "./textbookRetriever";
 import type { PcdfLayer } from "./pomosData";
+
+// 讲义四模块结果（与 lib/lecture.ts 的 LectureResult 同源）。
+export interface LectureResult {
+  topic: string;
+  concept: string; // 概念辨析
+  derivation: string; // 数理推导
+  image: string; // 图像分析
+  logic: string; // 逻辑贯通
+  markdown: string; // 由 lecture.toMarkdown 装配（离线生成时留空）
+  sources: string[]; // 引用教材 / KB 出处
+}
+// 按知识点 + 难度梯度出题请求（T06）
+export interface QuestionRequest {
+  subject: string;
+  knowledgePoint?: string;
+  difficulty: number; // 1-5
+  count?: number;
+}
 
 // FNV-1a 32-bit 哈希：把任意字符串映射为无符号整数。
 // 用于把「板块:难度」等输入稳定地派生为确定性种子（避免 Date.now() 引入的非确定性）。
@@ -57,31 +76,20 @@ export interface MistakeAnalysis {
   prevention: string;
 }
 
-export interface ReadinessScores {
-  province_top: number; // 省一概率 0-1
-  province_team: number; // 省队概率 0-1
-  ipho: number; // IPhO 概率 0-1
-}
-
-// 九维权重（用于就绪度与板块掌握度推导）
-const DIM_WEIGHT: Record<string, number> = {
-  concept: 1,
-  modeling: 1.1,
-  reasoning: 1.2,
-  calculation: 1,
-  experiment: 0.6,
-  transfer: 0.8,
-  meta: 0.5,
-  competition: 1.3,
-  growth: 0.4,
-};
-
-const BOARD_WEIGHT: Record<Board, Record<string, number>> = {
+// 板块 → 九维（认知）权重映射。导出供 offlineApi.masteryDeltaForBoard 复用，
+// 保证「训练回写增量」与「板块掌握度推导」单一数据源，不漂移。
+export const BOARD_WEIGHT: Record<Board, Record<string, number>> = {
   力学: { modeling: 1, reasoning: 1, calculation: 0.8, concept: 0.8 },
   电磁学: { modeling: 1, calculation: 1, reasoning: 0.9, transfer: 0.6 },
   热学: { concept: 1, calculation: 0.9, reasoning: 0.8 },
   光学: { concept: 1, modeling: 0.9, reasoning: 0.9 },
   近代物理: { concept: 1, reasoning: 1, calculation: 0.9, competition: 0.7 },
+  // ---------- 5 新学科（v2） ----------
+  高数: { calculation: 1, reasoning: 0.9, concept: 0.6, meta: 0.4 },
+  矢量分析: { calculation: 1, reasoning: 0.9, transfer: 0.6, concept: 0.5 },
+  线性代数: { calculation: 1, reasoning: 0.9, modeling: 0.5, meta: 0.4 },
+  理论力学: { modeling: 1, reasoning: 1, calculation: 0.8, competition: 0.6 },
+  电动力学: { reasoning: 1, calculation: 1, modeling: 0.9, transfer: 0.6, competition: 0.5 },
 };
 
 function clamp(v: number, lo = 0, hi = 1): number {
@@ -104,24 +112,6 @@ export function masteryTier(m: number): { label: string; desc: string; color: st
   if (m >= 60) return { label: "熟练", desc: "常规题稳定，综合题需引导", color: "#0ea5e9" };
   if (m >= 40) return { label: "基础", desc: "核心概念已建立，需系统训练", color: "#f59e0b" };
   return { label: "入门", desc: "刚起步，优先补齐概念与基础题", color: "#ef4444" };
-}
-
-// ---------------------------------------------------------------- 备赛就绪度（由九维推导）
-export function computeReadiness(twin: TwinLike): ReadinessScores {
-  const m = twinMap(twin);
-  let wsum = 0;
-  let vsum = 0;
-  for (const k of Object.keys(DIM_WEIGHT)) {
-    const v = m[k] ?? 0;
-    wsum += DIM_WEIGHT[k];
-    vsum += DIM_WEIGHT[k] * v;
-  }
-  const c = wsum > 0 ? vsum / wsum : 0; // 综合竞争力 0-1
-  return {
-    province_top: Number(clamp(0.1 + 0.9 * c, 0, 0.97).toFixed(3)),
-    province_team: Number(clamp(Math.pow(c, 1.4) * 0.92, 0, 0.92).toFixed(3)),
-    ipho: Number(clamp(Math.pow(c, 2.3) * 0.75, 0, 0.85).toFixed(3)),
-  };
 }
 
 // ---------------------------------------------------------------- 板块掌握度（由九维推导）
@@ -335,6 +325,99 @@ export interface DailyOut {
   task: string;
   type: string;
   priority: number;
+}
+
+// ---------------------------------------------------------------- 按知识点 + 梯度出题（T06）
+// 按具体知识点（如「刚体转动·平行轴定理」）定向产出 ≥3 道梯度题，难度围绕请求值上下铺开。
+export function generateQuestionsByPoint(req: QuestionRequest): GeneratedQuestion[] {
+  const board = (KG_BOARDS as readonly string[]).includes(req.subject)
+    ? (req.subject as Board)
+    : (findBoardByKeyword(`${req.subject} ${req.knowledgePoint ?? ""}`) ?? "力学");
+  const base = req.knowledgePoint?.trim() || req.subject.trim();
+  const count = Math.max(3, Math.min(6, req.count ?? 3));
+  const mid = clamp(Math.round(req.difficulty), 1, 5);
+  const ex = req.knowledgePoint?.trim() ? findExampleByPoint(req.knowledgePoint as string) : null;
+
+  const out: GeneratedQuestion[] = [];
+  for (let i = 0; i < count; i++) {
+    // 梯度：以请求难度为中点，向两侧铺开，保证 ≥3 档差异化
+    const diff = clamp(mid + (i - Math.floor((count - 1) / 2)), 1, 5);
+    let topic = `（${board}）${base}`;
+    let stem = "";
+    let hint = "";
+    let solutionPoints: string[] = [];
+    let keyPoints: string[] = [base];
+    if (ex) {
+      // 命中教材典型例题：围绕它变形，难度不同给不同提示层级
+      topic = `${ex.topic}（变式 ${i + 1}）`;
+      stem = ex.stem;
+      hint =
+        diff >= 4
+          ? "先独立写出完整过程，再对照解析自检卡点。"
+          : diff >= 3
+            ? ex.solution
+            : `提示：回顾「${base}」的核心公式，先建立物理图像再列式。`;
+      solutionPoints = [ex.solution];
+    } else {
+      const q = generateCompetitionQuestion(board, diff, hashStr(`${board}:${base}:${i}`));
+      topic = q.topic;
+      stem = q.stem;
+      hint = q.hint;
+      solutionPoints = q.solutionPoints;
+      keyPoints = q.keyPoints;
+    }
+    out.push({
+      id: `qpt-${board}-${hashStr(base + i)}`,
+      topic,
+      board,
+      difficulty: diff,
+      stem,
+      hint,
+      solutionPoints,
+      keyPoints,
+    });
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------- 离线四模块讲义（降级用，T07）
+// 复用教材库检索结果，装配「概念辨析 / 数理推导 / 图像分析 / 逻辑贯通」四模块。
+// markdown 字段留空，由 lib/lecture.ts 的 toMarkdown 统一装配（保证标题与 LECTURE_SECTIONS 一致）。
+export function generateLectureOffline(
+  topic: string,
+  ctx?: { knowledgePoint?: string; studentId?: string },
+): LectureResult {
+  const q = ctx?.knowledgePoint?.trim() || topic.trim();
+  const hits = searchTextbooks(q, 5);
+  const src = hits.map((h) => h.example?.source ?? `${h.textbook.title}·${h.chapter.title}`);
+  const pt = hits.find((h) => h.point)?.point;
+  const ex = hits.find((h) => h.example)?.example;
+
+  const concept = pt
+    ? `**${pt.title}**：\n${pt.summary}\n\n核心要点：${pt.keywords.join("、")}。`
+    : `围绕「${q}」建立物理图像：先明确已知量与所求量，再判断所属模型与适用定律。`;
+
+  const derivation = ex
+    ? `以典型例题「${ex.topic}」为例（难度 ${"★".repeat(ex.difficulty)}）：\n${ex.solution}`
+    : `按「表征→建模→数学映射→求解」四步推演「${q}」的标准过程，注意符号与量纲约定。`;
+
+  const image = pt
+    ? `建议绘制「${pt.title}」的情境图：建立坐标系、标注已知量与方向，用图像确认物理图景后再列式。`
+    : `绘制「${q}」的情境图（受力图 / 电路图 / 光路图 / 场线图），用图像辅助判断方向、相位与边界条件。`;
+
+  const logic = ex
+    ? `本题可迁移到「${pt?.title ?? q}」同类问题：核心判据一致，差异仅在参数与边界；建议再用 1 道变式题巩固。`
+    : `「${q}」与相邻板块（力电磁耦合 / 矢量场 / 分析力学）存在方法级共通：能量法、对称性与边界条件可跨情境复用。`;
+
+  return {
+    topic: q,
+    concept,
+    derivation,
+    image,
+    logic,
+    markdown: "",
+    sources: Array.from(new Set(src)),
+  };
 }
 
 export { BUG_CATEGORIES, KG_BOARDS, findBoardByKeyword };

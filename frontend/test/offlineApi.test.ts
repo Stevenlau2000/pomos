@@ -17,7 +17,7 @@ describe("pqFromTwin（经公共 API 验证 ⑤ 单源推导）", () => {
   it("顶栏 PQ 与仪表盘 PQ 同源（buildStudentUpdate ≈ getDashboard）", async () => {
     const id = "qa-pq-src-1";
     const dash = await Offline.getDashboard(id);
-    const upd = Offline.buildStudentUpdate(id);
+    const upd = await Offline.buildStudentUpdate(id);
     // 两者均来自 pqFromTwin(twinToMap(twin))，仅 buildStudentUpdate 多一次 toFixed(3) 取整
     expect(upd.pq).toBeCloseTo(dash.pq, 3);
   });
@@ -25,8 +25,17 @@ describe("pqFromTwin（经公共 API 验证 ⑤ 单源推导）", () => {
   it("PQ 落在 [0, 0.99] 且与 0.2 + 0.8*mean 手工计算一致", async () => {
     const id = "qa-pq-formula-1";
     const dash = await Offline.getDashboard(id);
-    const mean =
-      dash.twin.reduce((a, d) => a + d.value, 0) / (dash.twin.length || 1);
+    // PQ 仅由 9 个认知维度推导（学科维不纳入，与 pqFromTwin 同源）：
+    // 手工复算时也应只对这 9 个 key 取均值，而非对全 14 维求平均。
+    const PQ_KEYS = [
+      "concept", "modeling", "reasoning", "calculation",
+      "experiment", "transfer", "meta", "competition", "growth",
+    ];
+    const sum = PQ_KEYS.reduce(
+      (a, k) => a + (dash.twin.find((d) => d.key === k)?.value ?? 0),
+      0,
+    );
+    const mean = sum / PQ_KEYS.length;
     const expected = clamp(0.2 + 0.8 * mean, 0, 0.99);
     expect(dash.pq).toBeGreaterThanOrEqual(0);
     expect(dash.pq).toBeLessThanOrEqual(0.99);

@@ -19,6 +19,14 @@ interface ChatViewProps {
   onMentorModeChange?: (m: "general" | "competition") => void;
 }
 
+// 快速指令：点击即发送，引导用户触发生成类能力（含四模块讲义）。
+const QUICK_PROMPTS: { label: string; prompt: string }[] = [
+  { label: "生成讲义：电磁感应", prompt: "生成讲义：电磁感应" },
+  { label: "生成讲义：刚体定轴转动", prompt: "生成讲义：刚体定轴转动" },
+  { label: "给我一道竞赛题", prompt: "给我一道电磁学板块的竞赛题（难度 4）" },
+  { label: "针对性训练", prompt: "请针对我的知识图谱「电磁感应」生成一套针对性训练计划" },
+];
+
 const ChatView: React.FC<ChatViewProps> = ({
   messages,
   loading,
@@ -78,7 +86,7 @@ const ChatView: React.FC<ChatViewProps> = ({
             : t("views.chat.sub")}
         </p>
       </div>
-      <div className="flex flex-1 flex-col overflow-hidden">
+        <div className="flex flex-1 flex-col overflow-hidden">
         <ChatWindow messages={messages} loading={loading} />
         {isError && lastUserMsg && (
           <div className="flex items-center justify-between gap-3 border-t border-destructive/30 bg-destructive/5 px-4 py-2 text-xs">
@@ -92,6 +100,19 @@ const ChatView: React.FC<ChatViewProps> = ({
             </button>
           </div>
         )}
+        <div className="flex flex-wrap gap-2 border-t border-border px-4 py-2">
+          <span className="self-center text-[11px] text-muted-foreground">快速指令：</span>
+          {QUICK_PROMPTS.map((p) => (
+            <button
+              key={p.prompt}
+              onClick={() => onSend(p.prompt)}
+              disabled={loading}
+              className="rounded-full border border-border px-2.5 py-1 text-[11px] text-muted-foreground transition-colors hover:border-brand hover:text-brand disabled:opacity-60"
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
         <ChatInput onSend={onSend} disabled={loading} loading={loading} />
       </div>
     </div>

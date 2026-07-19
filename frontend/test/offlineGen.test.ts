@@ -1,9 +1,8 @@
 // test/offlineGen.test.ts
-// 离线生成引擎（纯函数）单元测试：就绪度 / 板块掌握度 / PCDF 八层 /
+// 离线生成引擎（纯函数）单元测试：板块掌握度 / PCDF 八层 /
 // 竞赛题目生成（确定性）/ 训练生成 / 错题归因。
 import { describe, it, expect } from "vitest";
 import {
-  computeReadiness,
   computeBoardMastery,
   derivePcdfLayers,
   generateCompetitionQuestion,
@@ -14,7 +13,7 @@ import {
   type TwinLike,
 } from "@/lib/offlineGen";
 
-// 九维 key（与 offlineGen DIM_WEIGHT 对应）
+// 九维 key（与离线孪生认知维度对应）
 const DIM_KEYS = [
   "concept",
   "modeling",
@@ -30,35 +29,6 @@ const DIM_KEYS = [
 function uniformTwin(v: number): TwinLike {
   return DIM_KEYS.map((key) => ({ key, value: v }));
 }
-
-describe("computeReadiness", () => {
-  it("低/中/高 twin 的就绪度均落在 0..1", () => {
-    for (const v of [0.2, 0.6, 0.95]) {
-      const r = computeReadiness(uniformTwin(v));
-      for (const k of ["province_top", "province_team", "ipho"] as const) {
-        expect(r[k]).toBeGreaterThanOrEqual(0);
-        expect(r[k]).toBeLessThanOrEqual(1);
-      }
-    }
-  });
-
-  it("就绪度随能力单调递增（高 > 中 > 低）", () => {
-    const lo = computeReadiness(uniformTwin(0.2));
-    const mid = computeReadiness(uniformTwin(0.6));
-    const hi = computeReadiness(uniformTwin(0.95));
-    for (const k of ["province_top", "province_team", "ipho"] as const) {
-      expect(mid[k]).toBeGreaterThan(lo[k]);
-      expect(hi[k]).toBeGreaterThan(mid[k]);
-    }
-  });
-
-  it("空 twin 不抛异常，且按公式 0.1+0.9*c 推导（c=0 → province_top=0.1）", () => {
-    const r = computeReadiness([]);
-    expect(r.province_top).toBeCloseTo(0.1, 5); // 0.1 + 0.9*0
-    expect(r.province_team).toBe(0); // 0^1.4 * 0.92 = 0
-    expect(r.ipho).toBe(0); // 0^2.3 * 0.75 = 0
-  });
-});
 
 describe("computeBoardMastery", () => {
   it("每个板块掌握度落在 0..100 且覆盖全部板块", () => {

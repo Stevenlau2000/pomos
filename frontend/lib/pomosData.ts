@@ -361,8 +361,3 @@ export const SAMPLE_GROWTH = [
   { ts: "2026-06", pq: 71 },
   { ts: "2026-07", pq: 81 },
 ];
-export const SAMPLE_READINESS = {
-  province_top: 0.86,
-  province_team: 0.47,
-  ipho: 0.12,
-};

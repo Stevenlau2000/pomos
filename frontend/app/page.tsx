@@ -14,6 +14,7 @@ import TrainingView from "@/components/views/TrainingView";
 import MistakesView from "@/components/views/MistakesView";
 import ModulesView from "@/components/views/ModulesView";
 import SettingsPanel from "@/components/settings/SettingsPanel";
+import KnowledgeBaseDrawer from "@/components/knowledge/KnowledgeBaseDrawer";
 import type { ChatMessage } from "@/components/chat/MessageBubble";
 import {
   getHealth,
@@ -25,6 +26,7 @@ import {
   detectApiMode,
   type StudentUpdate,
 } from "@/lib/api";
+import { migrateFromLocalStorage } from "@/lib/migrateLocalStorage";
 import { I18nProvider } from "@/lib/i18n";
 import { SAMPLE_PQ, type KGNode } from "@/lib/pomosData";
 
@@ -89,6 +91,8 @@ function WorkspaceInner() {
   const [settingsOpen, setSettingsOpen] = React.useState(false);
   // 后端不可达时为 true（GitHub Pages 等纯静态托管场景），显示离线演示提示
   const [offline, setOffline] = React.useState(false);
+  // 个人知识库抽屉（按学生隔离）
+  const [kbOpen, setKbOpen] = React.useState(false);
   // 最近一次对话的评估结果（驱动顶栏真实 PQ 与对话区「本次评估」卡片）
   const [lastUpdate, setLastUpdate] = React.useState<StudentUpdate | null>(null);
   const [student, setStudent] = React.useState<{ name: string; grade: string }>(
@@ -106,6 +110,8 @@ function WorkspaceInner() {
     detectApiMode()
       .then((m) => setOffline(m === "offline"))
       .catch(() => setOffline(true));
+    // 一次性迁移：旧版 localStorage 数据迁到 IndexedDB（按生隔离），仅浏览器内执行
+    migrateFromLocalStorage().catch(() => undefined);
   }, []);
 
   // 加载该学生的历史对话（后端持久化），有记录则覆盖初始示例
@@ -366,6 +372,7 @@ function WorkspaceInner() {
           onSelectStudent={handleSelectStudent}
           onCreateStudent={handleCreateStudent}
           onDeleteStudent={handleDeleteStudent}
+          onOpenKb={() => setKbOpen(true)}
         />
         <main className="flex-1 overflow-hidden">{renderView()}</main>
       </div>
@@ -389,6 +396,12 @@ function WorkspaceInner() {
           }
         }}
         onSaved={refreshHealth}
+      />
+
+      <KnowledgeBaseDrawer
+        open={kbOpen}
+        studentId={studentId}
+        onClose={() => setKbOpen(false)}
       />
     </div>
   );

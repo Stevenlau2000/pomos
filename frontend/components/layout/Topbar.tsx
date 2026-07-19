@@ -19,6 +19,7 @@ interface TopbarProps {
   onSelectStudent: (id: string) => void;
   onCreateStudent: (name: string, grade: string) => void;
   onDeleteStudent: (id: string) => void;
+  onOpenKb?: () => void;
 }
 
 const Topbar: React.FC<TopbarProps> = ({
@@ -33,6 +34,7 @@ const Topbar: React.FC<TopbarProps> = ({
   onSelectStudent,
   onCreateStudent,
   onDeleteStudent,
+  onOpenKb,
 }) => {
   return (
     <header className="flex items-center justify-between border-b border-border bg-background px-6 py-3">
@@ -42,6 +44,7 @@ const Topbar: React.FC<TopbarProps> = ({
         onSelect={onSelectStudent}
         onCreate={onCreateStudent}
         onDelete={onDeleteStudent}
+        onOpenKb={onOpenKb}
       />
 
       <div className="flex items-center gap-3">
