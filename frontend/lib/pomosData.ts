@@ -341,7 +341,7 @@ export const MODULE_STATUS: Record<string, ModuleInfo> = {
   m12: { status: "live", file: "backend/app/modules/m12_learning_orchestration.py", note: "ALOE 学习编排已实装：优先级评分(薄弱维多→高) + 艾宾浩斯复习间隔的周/日计划" },
   m13: { status: "live", file: "backend/app/memory.py", note: "CMOS 六层记忆已实装，按 student_id 多租户分片读写巩固" },
   m14: { status: "live", file: "backend/app/modules/assessment_engine.py", note: "HPCAS 由 orchestrator._assess 调用 assessment_engine（heuristic/llm 双路径）产出 PQ/雷达/就绪度；m14_competency_assessment.py 仅占位" },
-  m15: { status: "stub", file: "backend/app/modules/m15_multimodal.py", note: "UMLIE 结构化降级：检测图片/公式输入→返回需外部 OCR/LLM 服务的明确信号(external_required)，纯本地不实现" },
+  m15: { status: "live", file: "backend/app/modules/m15_multimodal.py", note: "UMLIE 本地规则增强已实装：公式 LaTeX 本地校验（括号配对/命令白名单/环境闭合）+ 图片类型分类（受力图/电路图/光路图/波形图等）+ 结构化处理建议；图片深度 OCR 仍需外部服务" },
   m16: { status: "live", file: "backend/app/orchestrator.py", note: "真正的 LangGraph 编排在 orchestrator.py（classify→dispatch→assemble→assess，含退化链）；m16_runtime_orchestrator.py 为静态占位" },
 };
 
