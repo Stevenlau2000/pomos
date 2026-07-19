@@ -102,6 +102,11 @@ function WorkspaceInner() {
   const [mentorMode, setMentorMode] = React.useState<"general" | "competition">("general");
   // SSE 流式连接的生命周期控制：切视图或重入时中止上一个请求
   const abortRef = React.useRef<AbortController | null>(null);
+  // 稳定的中止回调：identity 固定，避免 ChatView 的 useEffect 依赖因重渲染而变化，
+  // 从而在流式输出期间（每次 onDelta 触发 setMessages 重渲染）误触发 cleanup 把正在进行的连接 abort 掉。
+  const handleAbort = React.useCallback(() => {
+    abortRef.current?.abort();
+  }, []);
 
   // 拉取后端健康状态，反映真实模型接入情况（多供应商）
   React.useEffect(() => {
@@ -189,11 +194,26 @@ function WorkspaceInner() {
             setRefreshKey((k) => k + 1); // 画像/评估已变动，刷新数据视图
           },
           onError: (detail) => {
+            // 「已取消生成」是主动中止（切视图 / 重入）的哨兵：静默丢弃末尾占位气泡，不展示误导错误。
+            if (detail === "已取消生成") {
+              setMessages((prev) => {
+                const copy = [...prev];
+                if (
+                  copy.length &&
+                  copy[copy.length - 1].role === "mentor" &&
+                  copy[copy.length - 1].content === ""
+                ) {
+                  copy.pop();
+                }
+                return copy;
+              });
+              return;
+            }
             setMessages((prev) => {
               const copy = [...prev];
               copy[copy.length - 1] = {
                 role: "mentor",
-                content: `⚠️ 连接导师失败：${detail}。请确认后端 http://localhost:8000 已启动。`,
+                content: `⚠️ 暂时无法连接导师：${detail}。当前为离线演示模式，可稍后重试；如需真实 AI 辅导，请在设置中配置 LLM 密钥并重新部署后端。`,
               };
               return copy;
             });
@@ -208,7 +228,7 @@ function WorkspaceInner() {
         const copy = [...prev];
         copy[copy.length - 1] = {
           role: "mentor",
-          content: `⚠️ 连接导师失败：${String(e)}。请确认后端 http://localhost:8000 已启动。`,
+          content: `⚠️ 暂时无法连接导师：${String(e)}。当前为离线演示模式，可稍后重试。`,
         };
         return copy;
       });
@@ -303,7 +323,7 @@ function WorkspaceInner() {
             messages={messages}
             loading={loading}
             onSend={handleSend}
-            onAbort={() => abortRef.current?.abort()}
+            onAbort={handleAbort}
             mentorMode={mentorMode}
             onMentorModeChange={setMentorMode}
           />

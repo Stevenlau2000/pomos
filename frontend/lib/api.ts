@@ -73,8 +73,29 @@ export function getApiMode(): ApiMode {
   return MODE;
 }
 
+/**
+ * 纯静态托管环境判定：GitHub Pages（stevenlau2000.github.io/pomos）等静态站点无法运行后端，
+ * 且访问者浏览器所在机器的 localhost:8000 并非 POMOS 后端。
+ * 此时若未显式配置后端（NEXT_PUBLIC_API_BASE 为空，API_BASE 默认 localhost:8000），
+ * 则注定无法连通，直接离线，避免向 localhost:8000 发起注定失败的请求，也避免暴露「请确认后端已启动」式误导文案。
+ * 若部署时已通过 NEXT_PUBLIC_API_BASE 指向真实后端，则不在此强制离线，仍走 detectApiMode 健康探测。
+ */
+export function isStaticHost(): boolean {
+  if (typeof window === "undefined") return false;
+  const h = window.location.hostname;
+  const isLocal = h === "localhost" || h === "127.0.0.1" || h === "::1";
+  if (isLocal) return false;
+  // 非 localhost 且未显式配置后端地址 → 视为纯静态托管，强制离线
+  return !process.env.NEXT_PUBLIC_API_BASE;
+}
+
 /** 探测后端健康状态，决定 online / offline 模式。失败（网络错误 / 非 2xx）即回退离线。 */
 export async function detectApiMode(): Promise<ApiMode> {
+  // 纯静态托管（非 localhost）直接离线，不发起任何后端请求
+  if (isStaticHost()) {
+    MODE = "offline";
+    return MODE;
+  }
   try {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 2500);
@@ -88,7 +109,9 @@ export async function detectApiMode(): Promise<ApiMode> {
 }
 
 function offlineMode(): boolean {
-  return MODE === "offline";
+  // 纯静态托管环境强制离线（与 detectApiMode 判定一致）；
+  // 亦兼容 MODE 异步尚未就绪的场景（如首屏 refreshHealth 早于 detectApiMode 完成），避免误走在线分支请求 localhost:8000。
+  return isStaticHost() || MODE === "offline";
 }
 
 // ---------- 类型定义（与后端契约一致） ----------
