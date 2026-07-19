@@ -69,3 +69,56 @@ backend/app/config.py:107-114  _persist_runtime_settings()
 - See Also: LRN-20260711-002
 
 ---
+
+## [ERR-20260718-001] backend_chat_uuid_nameerror
+
+**Logged**: 2026-07-18T15:40:00+08:00
+**Priority**: high
+**Status**: pending
+**Area**: backend
+
+### Summary
+`app/api/routes/chat.py` L56/L95/L155 调用 `uuid.uuid4()`，但文件未 `import uuid`（仅 orchestrator/main/settings 导入）。当 `request.state.request_id` 缺失或进入 except 兜底分支时触发 `NameError`，掩盖真实异常、污染日志。
+
+### Error
+```
+NameError: name 'uuid' is not defined
+```
+
+### Context
+- 文件：backend/app/api/routes/chat.py
+- 复现：请求未携带 request_id 中间件注入时进入兜底分支即报错
+
+### Suggested Fix
+在 chat.py 顶部加 `import uuid`（一行修复）。
+
+### Metadata
+- Reproducible: yes
+- Related Files: backend/app/api/routes/chat.py
+- Tags: backend, bug, import-missing
+
+---
+
+## [ERR-20260718-002] frontend_offline_stream_no_signal
+
+**Logged**: 2026-07-18T15:40:00+08:00
+**Priority**: high
+**Status**: pending
+**Area**: frontend
+
+### Summary
+`lib/api.ts` 的 `streamChat` 在 `offlineMode()` 分支（L309）调用 `offline.streamChat(input, handlers)` 未透传 `signal`；离线分支的 `for` 循环（`await sleep(16)`）不可中止。用户切视图/重发时 `abort()` 无法取消旧流，导致两条回复内容交错、顶栏评估被覆盖。
+
+### Context
+- 文件：frontend/lib/api.ts:309；frontend/lib/offlineApi.ts streamChat
+- online 分支（L315）已传 signal，离线分支遗漏
+
+### Suggested Fix
+给 `offlineApi.streamChat` 增加 `signal` 参数，循环每次检查 `signal?.aborted`；`api.ts:309` 透传 `signal`。
+
+### Metadata
+- Reproducible: yes
+- Related Files: frontend/lib/api.ts, frontend/lib/offlineApi.ts
+- Tags: frontend, streaming, abort, concurrency
+
+---

@@ -282,3 +282,57 @@ medium
 - 后端 8000 在线（venv + --reload 热加载），前端 3000 未改动。
 
 ---
+
+## [FEAT-20260718-001] frontend_test_suite
+
+**Logged**: 2026-07-18T15:44:00+08:00
+**Priority**: high
+**Status**: pending
+**Area**: frontend
+
+### Requested Capability
+为前端引入单元测试框架（建议 vitest），覆盖 8 项升级后新增的纯逻辑，提供回归保护。
+
+### User Context
+当前前端 0 测试，离线生成引擎（offlineGen/physicsKB/offlineApi）的任何改动都无自动化验证，易引入回归。
+
+### Complexity Estimate
+medium
+
+### Suggested Implementation
+- 安装 vitest + @testing-library 可选
+- 优先覆盖：offlineGen 全部纯函数、physicsKB 检索/推断、offlineApi 确定性（hashStr/makeRng/buildMockFromTwin）与边界（空 twin/NaN/非法 board）
+- 配置 `npm run test` 脚本
+
+### Metadata
+- Frequency: first_time
+- Related Features: offlineGen.ts, physicsKB.ts, offlineApi.ts
+
+---
+
+## [FEAT-20260718-002] backend_auth_and_ssrf_guard
+
+**Logged**: 2026-07-18T15:44:00+08:00
+**Priority**: critical
+**Status**: pending
+**Area**: backend
+
+### Requested Capability
+为后端补认证/授权，并对 `llm_base_url` 等外部地址做 SSRF 防护（网段黑名单）。
+
+### User Context
+当前所有端点无任何鉴权，任何人可读写任意学生画像/对话/错题，并可覆写系统级 LLM 密钥与 CORS；`llm_base_url` 无私有网段黑名单，存在 SSRF 窃取云凭据风险。GitHub Pages 静态部署下后端不公开，但本地/内网部署时风险真实。
+
+### Complexity Estimate
+complex
+
+### Suggested Implementation
+- 加共享密钥/Bearer 中间件或本地回环白名单
+- 标记 `PUT /api/settings` 为受保护端点
+- `validate_settings` 对 `llm_base_url` 做 DNS 解析并拒绝 RFC1918/169.254.0.0/16/链路本地
+
+### Metadata
+- Frequency: first_time
+- Related Features: main.py, config.py, settings.py
+
+---

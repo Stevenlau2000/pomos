@@ -1,30 +1,28 @@
 sequenceDiagram
     autonumber
-    participant U as 学生(前端)
-    participant API as chat.py /api/chat
-    participant ORC as orchestrator._dispatch
-    participant M04 as Student.twin (DB)
-    participant M05 as detect_misconceptions
-    participant M08 as TeachingStrategyModule
-    participant M10 as OlympiadCoachingModule
+    participant O as orchestrator._dispatch
+    participant M as 目标模块.run(ctx)
+    participant C as _common
+    participant D as app.data
+    participant A as assessment_engine
 
-    U->>API: POST /api/chat {message:"教练帮我做这道电磁感应题"}
-    API->>M04: db.get(Student) → twin (chat.py:43-48)
-    API->>ORC: run_orchestrator(student_id, message, twin)
-    ORC->>ORC: _classify → intent="coaching" (关键词 教练/辅导, orchestrator.py:46-77)
-    ORC->>ORC: _dispatch 构造 ctx（改动点1：注入 twin, orchestrator.py:127-133）
-    Note over ORC: 改动点2：intent=="coaching" 走 m08→m10 管道
-    ORC->>M08: m08.run(ctx)
-    M08->>M05: detect_misconceptions(message, lang)
-    M08->>M08: select_strategy(twin, diagnosis, goal, lang)
-    M08-->>ORC: {mode, hint_level, rationale, target_dims}
-    ORC->>ORC: ctx.student_ctx["teaching_strategy"] = M08 输出
-    ORC->>M10: m10.run(ctx)  # 携带 teaching_strategy
-    M10->>M08: select_strategy(...) 若 student_ctx 无则回退调用（m10→m08 依赖）
-    M10->>M10: evaluate_answer(student_answer, reference)
-    M10->>M10: aocs_transition(prev_state, evaluation)
-    M10->>M08: generate_hint(hint_level, problem_meta)  # action==给提示 时
-    M10-->>ORC: {turn, feedback, hint_level, action, next_step, aocs_status}
-    ORC-->>API: last_result = m10 输出 (module_trace 含 m08+m10)
-    API->>API: apply_student_update(评估闭环) + 落库 (chat.py:73)
-    API-->>U: {reply, module_trace, student_update}
+    O->>O: _classify_intent(message) → intent
+    O->>O: ctx["twin"] = state.get("twin") or {}
+    O->>O: student_ctx.setdefault("twin", ...)
+    O->>M: primary.run(ctx)
+    M->>M: if not isinstance(ctx,dict): ctx={}
+    M->>C: safe_twin(ctx) / _lang(ctx)
+    C-->>M: twin(NINE_DIMS归一) / lang
+    M->>A: NINE_DIMS (复用，不重定义)
+    M->>D: KG_NODES / PROBLEM_BANK / INQUIRY_TEMPLATES
+    D-->>M: 内置数据
+    M->>M: 内部纯函数(weak_nodes / trace_thinking / recommend_problem / ...)
+    alt 空 ctx / 缺字段
+        M-->>M: 回退默认(全0 twin / 默认 board / 默认 goal)
+    end
+    M-->>O: {module, action, output:{...}, next}
+    O->>O: student_ctx.update(output)
+    O->>O: 调 m16 系统大脑协调
+    Note over M: m15 特例：detect_modality 命中 image/formula → next="external_multimodal_required"，不抛异常
+
+    Note over O,M: 静态类 m01/m02/m03：run 仅读 student_id，其余走 build_identity/build_mission/build_philosophy(lang)，输出含 service_boundary / philosophy_templates(≥3)

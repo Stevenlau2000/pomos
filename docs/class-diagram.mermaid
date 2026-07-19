@@ -6,30 +6,58 @@ classDiagram
         +spec: str
         +run(ctx: dict) dict*
     }
-    class TeachingStrategyModule {
-        +run(ctx: dict) dict
-        -_infer_goal(ctx) dict
+    class CommonHelpers {
+        <<module app.modules._common>>
+        +WEAK_THRESHOLD: float
+        +_lang(ctx) str
+        +safe_twin(ctx) dict
+        +pick(zh, en, ctx) str
     }
-    class OlympiadCoachingModule {
-        +run(ctx: dict) dict
-        -_restore_state(ctx) dict
+    class DataLayer {
+        <<package app.data>>
+        KG_NODES / KG_LINKS / KG_BOARDS
+        PROBLEM_BANK
+        INQUIRY_TEMPLATES
     }
-    ModuleBase <|-- TeachingStrategyModule
-    ModuleBase <|-- OlympiadCoachingModule
+    class AssessmentEngine {
+        <<module>>
+        +NINE_DIMS: list
+        +detect_misconceptions(msg, lang) list
+    }
+    class IdentityModule { +run(ctx) dict }
+    class MissionModule { +run(ctx) dict }
+    class PhilosophyModule { +run(ctx) dict }
+    class KnowledgeGraphModule { +run(ctx) dict +weak_nodes() +prereq_path() }
+    class PhysicsThinkingModule { +run(ctx) dict +trace_thinking() }
+    class OlympiadProblemModule { +run(ctx) dict +recommend_problem() +adapt_problem() }
+    class ScientificInquiryModule { +run(ctx) dict +design_experiment() +error_analysis() +data_fitting() }
+    class LearningOrchestrationModule { +run(ctx) dict +weekly_plan() +daily_plan() +priority_score() }
+    class MultimodalModule { +run(ctx) dict +detect_modality() }
 
-    class M08Helpers {
-        <<module-level pure fns>>
-        +route_mode(signals) str
-        +initial_hint_level(twin, diagnosis, problem_meta) int
-        +generate_hint(level, problem_meta, lang) str
-        +select_strategy(twin, diagnosis, goal, lang) dict
-    }
-    class M10Helpers {
-        <<module-level pure fns>>
-        +evaluate_answer(student_answer, reference, lang) str
-        +aocs_transition(prev_state, evaluation, lang) dict
-        +build_feedback(state, strategy, lang) str
-    }
-    M08Helpers <.. TeachingStrategyModule : used by run
-    M08Helpers <.. OlympiadCoachingModule : imported (m10 to m08 dependency)
-    M10Helpers <.. OlympiadCoachingModule : used by run
+    ModuleBase <|-- IdentityModule
+    ModuleBase <|-- MissionModule
+    ModuleBase <|-- PhilosophyModule
+    ModuleBase <|-- KnowledgeGraphModule
+    ModuleBase <|-- PhysicsThinkingModule
+    ModuleBase <|-- OlympiadProblemModule
+    ModuleBase <|-- ScientificInquiryModule
+    ModuleBase <|-- LearningOrchestrationModule
+    ModuleBase <|-- MultimodalModule
+
+    IdentityModule ..> CommonHelpers : _lang/pick
+    PhilosophyModule ..> CommonHelpers : _lang/pick
+    KnowledgeGraphModule ..> CommonHelpers : safe_twin/_lang
+    KnowledgeGraphModule ..> DataLayer : KG_NODES/KG_LINKS
+    PhysicsThinkingModule ..> CommonHelpers : safe_twin/_lang
+    OlympiadProblemModule ..> CommonHelpers : safe_twin/_lang
+    OlympiadProblemModule ..> DataLayer : PROBLEM_BANK
+    ScientificInquiryModule ..> CommonHelpers : safe_twin/_lang
+    ScientificInquiryModule ..> DataLayer : INQUIRY_TEMPLATES
+    LearningOrchestrationModule ..> CommonHelpers : safe_twin
+    MultimodalModule ..> CommonHelpers : _lang
+
+    KnowledgeGraphModule ..> AssessmentEngine : NINE_DIMS
+    PhysicsThinkingModule ..> AssessmentEngine : NINE_DIMS
+    OlympiadProblemModule ..> AssessmentEngine : NINE_DIMS
+    ScientificInquiryModule ..> AssessmentEngine : NINE_DIMS
+    LearningOrchestrationModule ..> AssessmentEngine : NINE_DIMS
