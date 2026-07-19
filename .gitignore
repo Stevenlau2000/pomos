@@ -25,6 +25,7 @@ frontend/out/
 frontend/.vercel/
 frontend/*.tsbuildinfo
 frontend/.env*.local
+frontend/.next_run*/
 
 # ---------- 产物 ----------
 dist/
