@@ -327,21 +327,21 @@ export interface ModuleInfo {
 }
 
 export const MODULE_STATUS: Record<string, ModuleInfo> = {
-  m01: { status: "stub", file: "backend/app/modules/m01_identity.py", note: "导师身份/口吻/服务边界设定（静态字典）" },
-  m02: { status: "stub", file: "backend/app/modules/m02_mission.py", note: "使命与首性原理原则（静态字典）" },
-  m03: { status: "stub", file: "backend/app/modules/m03_philosophy.py", note: "苏格拉底式+脚手架+元认知教学信条（静态字典）" },
+  m01: { status: "live", file: "backend/app/modules/m01_identity.py", note: "导师身份/口吻/服务边界（能/不能做什么）已实装：build_identity 双语输出 persona/tone/scope/service_boundary" },
+  m02: { status: "live", file: "backend/app/modules/m02_mission.py", note: "使命与首性原理等核心原则已实装：build_mission 双语输出 mission/principles" },
+  m03: { status: "live", file: "backend/app/modules/m03_philosophy.py", note: "苏格拉底式提问+脚手架+元认知三类信条已实装（每类含 zh/en 文本）" },
   m04: { status: "live", file: "backend/app/modules/m04_student_model.py", note: "九维 Student Twin 已接入编排与画像闭环（growth 增量含硬编码基线，待接真实成长模型）" },
   m05: { status: "live", file: "backend/app/modules/m05_diagnosis.py", note: "PCDF 八层 + detect_misconceptions 误区检测已实装，输出八层分数与 bug 清单" },
-  m06: { status: "stub", file: "backend/app/modules/m06_knowledge_graph.py", note: "六层图谱前端 demo 已渲染（KG_NODES/KG_LINKS），后端图谱逻辑未实现，当前返回硬编码示范节点" },
-  m07: { status: "stub", file: "backend/app/modules/m07_physics_thinking.py", note: "十阶段物理思维管线规划中：从物理图像到数学表达的系统化推演" },
+  m06: { status: "live", file: "backend/app/modules/m06_knowledge_graph.py", note: "六层 KG 引擎已实装：内置知识库(app.data.kg_core) + 按 twin 薄弱维定位 top-N 节点及 prerequisite 路径" },
+  m07: { status: "live", file: "backend/app/modules/m07_physics_thinking.py", note: "十阶段物理思维管线已实装：trace_thinking 基于题面启发式生成十阶段提示（不调 LLM）" },
   m08: { status: "live", file: "backend/app/modules/m08_teaching_strategy.py", note: "六模式+五级 Hint 规则引擎已实装（纯规则，不接 LLM）" },
-  m09: { status: "stub", file: "backend/app/modules/m09_olympiad_problem.py", note: "OPIE 竞赛题解码（检索/生成/改编/解析）规划中" },
+  m09: { status: "live", file: "backend/app/modules/m09_olympiad_problem.py", note: "OPIE 竞赛题已实装：题库检索/难度匹配/参数改编（考点不变、难度档位匹配），双语题目与解析" },
   m10: { status: "live", file: "backend/app/modules/m10_olympiad_coaching.py", note: "AOCS 单题多轮自适应状态机已实装（纯规则，多轮连贯需调用方回传 student_ctx.aocs_state）" },
-  m11: { status: "stub", file: "backend/app/modules/m11_scientific_inquiry.py", note: "SIEE 实验设计/误差分析/数据处理规划中" },
-  m12: { status: "stub", file: "backend/app/modules/m12_learning_orchestration.py", note: "ALOE 排程与学习路径规划中" },
+  m11: { status: "live", file: "backend/app/modules/m11_scientific_inquiry.py", note: "SIEE 实验探究已实装：实验设计模板 + 不确定度模型(A类 s/√n、B类 Δ/√3) + 拟合建议(逐差法/最小二乘)" },
+  m12: { status: "live", file: "backend/app/modules/m12_learning_orchestration.py", note: "ALOE 学习编排已实装：优先级评分(薄弱维多→高) + 艾宾浩斯复习间隔的周/日计划" },
   m13: { status: "live", file: "backend/app/memory.py", note: "CMOS 六层记忆已实装，按 student_id 多租户分片读写巩固" },
   m14: { status: "live", file: "backend/app/modules/assessment_engine.py", note: "HPCAS 由 orchestrator._assess 调用 assessment_engine（heuristic/llm 双路径）产出 PQ/雷达/就绪度；m14_competency_assessment.py 仅占位" },
-  m15: { status: "stub", file: "backend/app/modules/m15_multimodal.py", note: "UMLIE 题目图片/手绘/公式 OCR 规划中" },
+  m15: { status: "stub", file: "backend/app/modules/m15_multimodal.py", note: "UMLIE 结构化降级：检测图片/公式输入→返回需外部 OCR/LLM 服务的明确信号(external_required)，纯本地不实现" },
   m16: { status: "live", file: "backend/app/orchestrator.py", note: "真正的 LangGraph 编排在 orchestrator.py（classify→dispatch→assemble→assess，含退化链）；m16_runtime_orchestrator.py 为静态占位" },
 };
 
