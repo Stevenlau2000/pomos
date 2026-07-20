@@ -52,6 +52,7 @@ import { getLlmConfig } from "./llm";
 // 结构化讲解通道：explainChat 内部按意图走云端优先 → 离线降级 → 讲义适配；
 // detectChatIntent 为纯函数路由依据（与 api.ts 同源）。
 import { explainChat, detectChatIntent, type PomosExplainV1 } from "./explain";
+import { generateExplainOffline } from "./explain/offline";
 
 // ---------------------------------------------------------------- 存储工具（仅 lang 允许走 localStorage）
 const KEYS = {
@@ -539,23 +540,30 @@ async function streamExplain(
     handlers.onError?.("已取消生成");
     return;
   }
-  const explain = await explainChat(
+  // 讲解生成失败（被中止 / 云端与离线均不可用）：先尝试纯离线结构化讲解，
+  // 仍失败才回退原始离线教练 markdown 流。确保「为什么/请讲解」类问题尽量出现卡片。
+  let explain = await explainChat(
     { student_id: input.student_id, message: input.message },
     {
       onError: (d) => handlers.onError?.(d),
+      onExplain: handlers.onExplain as ((e: PomosExplainV1) => void) | undefined,
       onMeta: handlers.onMeta as ((m: unknown) => void) | undefined,
       onAssessment: handlers.onAssessment as ((u: unknown) => void) | undefined,
       onDone: handlers.onDone as (() => void) | undefined,
     },
     signal,
   );
-  // 讲解生成失败（被中止 / 云端与离线均不可用）：回退原始离线教练 markdown 流
   if (!explain) {
-    const full =
-      (await mentorGenerate(input.message, input.student_id)) ??
-      offlineTutor(input.message, getCoachLang());
-
-    return streamMarkdown(input, full, handlers, signal);
+    try {
+      const offline = await generateExplainOffline(input.message, input.student_id);
+      explain = { ...offline, mode: "offline", offline_fallback: true };
+      handlers.onExplain?.(explain);
+    } catch {
+      const full =
+        (await mentorGenerate(input.message, input.student_id)) ??
+        offlineTutor(input.message, getCoachLang());
+      return streamMarkdown(input, full, handlers, signal);
+    }
   }
   // 流式揭示标题，保证 onDelta 被调用（回归 ⑤，兼容旧测试）
   handlers.onDelta?.(explain.title);

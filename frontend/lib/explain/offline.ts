@@ -29,10 +29,10 @@ interface ExplainTopic {
 const OFFLINE_EXPLAIN_TOPICS: ExplainTopic[] = [
   {
     keys: ["抛体", "斜抛", "平抛", "projectile", "抛物线"],
-    title: "斜抛运动的水平匀速性",
+    title: "斜抛运动：水平方向为什么匀速？",
     board: "力学",
     template: "抛体",
-    misconception: "忽略空气阻力；勿把「初速分解」误作「加速度分解」（加速度始终竖直向下）。",
+    misconception: "忽略空气阻力；勿把「初速分解」误作「加速度分解」（加速度始终竖直向下，不随初速方向变）。",
     phases: {
       问题拆解: {
         text: "取抛出点为原点，x 轴水平向右，y 轴竖直向上。将初速 $\\mathbf v_0$ 分解为 $v_{0x}=v_0\\cos\\theta$、$v_{0y}=v_0\\sin\\theta$。",
@@ -51,10 +51,10 @@ const OFFLINE_EXPLAIN_TOPICS: ExplainTopic[] = [
         formulas: ["v_x=v_0\\cos\\theta", "v_y=v_0\\sin\\theta-gt"],
       },
       结论: {
-        text: "水平方向因 $a_x=0$ 始终以 $v_0\\cos\\theta$ 匀速，竖直方向为匀加速。斜抛是「匀速 + 匀加速」的合运动。",
+        text: "水平方向不受力，根据牛顿第一定律，速度保持其初水平分量 $v_0\\cos\\theta$ 不变，即水平匀速。竖直方向为匀加速。斜抛 = 水平匀速 + 竖直匀加速。",
       },
       易错点: {
-        text: "常见误判：把初速分解当成加速度分解。加速度只来自重力，始终竖直向下，不随初速方向改变。",
+        text: "常见误判：把初速分解当成加速度分解。加速度只由重力产生，始终竖直向下，不会沿初速方向分解；因此水平方向没有加速度分量。",
       },
     },
   },
