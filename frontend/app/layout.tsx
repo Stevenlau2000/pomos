@@ -1,5 +1,5 @@
 // app/layout.tsx
-// 根布局：引入 globals.css，设置中文字体（系统字体栈，避免网络字体依赖）。
+// 根布局：引入 globals.css，支持深色/浅色主题切换。
 import type { Metadata } from "next";
 import "./globals.css";
 
@@ -14,8 +14,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="zh-CN">
-      <body className="min-h-screen bg-background font-sans antialiased">
+    <html lang="zh-CN" data-theme="dark">
+      <body className="min-h-screen bg-background font-body antialiased">
         {children}
       </body>
     </html>
