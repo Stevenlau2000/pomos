@@ -1,0 +1,15 @@
+{
+  "schema_version": "1.0",
+  "title": "斜抛运动：水平方向为什么匀速？",
+  "mode": "offline",
+  "steps": [
+    {"id":"s1","phase":"问题拆解","heading":"建立坐标系与受力分析","text":"取抛出点为原点，x 轴水平向右，y 轴竖直向上。抛体仅受重力，水平方向不受外力。","formulas":["F_x = 0, F_y = -mg"],"diagram":{"kind":"force","spec":{"bodies":[{"label":"抛体","forces":[{"type":"gravity","dir":[0,-1],"mag":1}]}]},"caption":"抛体仅受重力"},"animation":null,"misconception":null,"sourceRefs":["赵凯华《新概念物理教程·力学》§2.4"]},
+    {"id":"s2","phase":"概念辨析","heading":"牛顿第一定律的适用条件","text":"水平方向合外力为零，水平速度分量保持不变。","formulas":["∑F_x = 0 ⇒ a_x = 0"],"diagram":null,"animation":null,"misconception":"空气阻力不可忽略时水平方向受力不再为零。","sourceRefs":[]},
+    {"id":"s3","phase":"数理推导","heading":"运动方程推导","text":"x 方向 ax=0 ⇒ vx=v₀cosθ（常数）；y 方向 ay=-g。","formulas":["x = v₀cosθ·t","y = v₀sinθ·t - ½gt²","v_x = v₀cosθ = const"],"diagram":null,"animation":null,"misconception":null,"sourceRefs":["舒幼生《力学》第3章"]},
+    {"id":"s4","phase":"图像分析","heading":"轨迹与速度分解图","text":"轨迹为抛物线；任一点速度可分解为水平分量（恒定）与竖直分量（匀减速）。","formulas":[],"diagram":{"kind":"trajectory","spec":{"v0":20,"theta":45,"g":9.8},"caption":"抛体运动轨迹"},"animation":{"type":"projectile","params":{"v0":20,"theta":45,"g":9.8},"durationMs":2000,"caption":"抛体运动动画"},"misconception":null,"sourceRefs":[]},
+    {"id":"s5","phase":"结论","heading":"核心结论","text":"水平方向不受力，加速度为零，保持 v₀cosθ 匀速；竖直方向匀加速。两者独立。","formulas":["v_x = v₀cosθ = const"],"diagram":null,"animation":null,"misconception":null,"sourceRefs":[]},
+    {"id":"s6","phase":"易错点","heading":"常见错误与陷阱","text":"勿把初速分解误作加速度分解；仅无阻力时水平才匀速。","formulas":[],"diagram":null,"animation":null,"misconception":"勿把「初速分解」误作「加速度分解」。","sourceRefs":[]}
+  ],
+  "sources":["赵凯华《新概念物理教程·力学》§2.4","舒幼生《力学》第3章"],
+  "offline_fallback": false
+}

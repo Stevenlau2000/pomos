@@ -273,7 +273,20 @@ export const OFFLINE_EXPLAIN_TEMPLATES: Map<
       },
     },
   ],
-  ] as Array<[string, { diagram?: DiagramSpec; animation?: AnimationSpec }]>),
+  [
+    "mermaid",
+    {
+      diagram: {
+        kind: "mermaid",
+        spec: {
+          definition:
+            "graph TD\\n  A[运动学] --> B[牛顿定律]\\n  B --> C[能量守恒]\\n  C --> D[刚体转动]\\n  C --> E[振动与波]\\n  B --> F[静电场]\\n  F --> G[电路]\\n  F --> H[磁场]\\n  C --> I[电磁感应]\\n  H --> I",
+        },
+        caption: "物理知识图谱前置路径",
+      },
+    },
+  ],
+] as Array<[string, { diagram?: DiagramSpec; animation?: AnimationSpec }]>),
 );
 
 /** 取得某关键词命中的预置图 / 动画（大小写无关） */
